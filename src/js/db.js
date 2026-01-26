@@ -1,0 +1,55 @@
+const DB_NAME = 'restroDB';
+const DB_VERSION = 6;
+
+export function openDB() {
+    return new Promise((resolve, reject) => {
+        const request = indexedDB.open(DB_NAME, DB_VERSION);
+
+        request.onerror = () => {
+            console.error('[DB] Failed to open DB', request.error);
+            reject(request.error);
+        };
+
+        request.onsuccess = () => {
+            const db = request.result;
+            resolve(db);
+        };
+
+        request.onupgradeneeded = (e) => {
+            const db = e.target.result;
+
+            console.log('[DB] Upgrade needed → version', DB_VERSION);
+
+            if (!db.objectStoreNames.contains('agent_sessions')) {
+                const sessions = db.createObjectStore('agent_sessions', {
+                    keyPath: 'sessionID'
+                });
+
+                sessions.createIndex('agentId', 'agentId', { unique: false });
+                sessions.createIndex('status', 'status', { unique: false });
+            }
+
+            if (db.objectStoreNames.contains('tickets')) {
+                db.deleteObjectStore('tickets');
+            }
+
+            const tickets = db.createObjectStore('tickets', {
+                keyPath: 'ticketId' 
+            });
+
+            tickets.createIndex('agentId', 'agentId', { unique: false });
+            tickets.createIndex('status', 'status', { unique: false });
+            tickets.createIndex('issueDateTime', 'issueDateTime', { unique: false });
+
+            if (!db.objectStoreNames.contains('attachments')) {
+                const attachments = db.createObjectStore('attachments', {
+                    keyPath: 'attachmentId' 
+                });
+
+                attachments.createIndex('ticketId', 'ticketId', { unique: false });
+                attachments.createIndex('agentId', 'agentId', { unique: false });
+                attachments.createIndex('createdAt', 'createdAt', { unique: false });
+            }
+        };
+    });
+}
