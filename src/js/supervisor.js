@@ -7,6 +7,7 @@ import { startSSE } from './comms/sse.js';
 import { updateProtocolLED } from './utils/connectionLED.js';
 import { startLongPolling } from './comms/longPoll.js';
 import { sendMessage } from './comms/websocket.js';
+import './utils/memoryDebug.js';
 
 
 
@@ -141,8 +142,6 @@ function loadAgents() {
         }
     };
 }
-
-
 function processSessions(sessions) {
     const map = new Map();
 
@@ -679,19 +678,7 @@ function formatDuration(ms) {
 function handleProtocolStatus(protocol, status) {
     updateProtocolLED(protocol, status === 'connected');
 }
-/*function handleSupervisorCommand(cmd) {
-    if (!cmd || !cmd.type) return;
 
-    if (cmd.type === 'FORCE_LOGOUT') {
-        console.warn('[LP] Whisper delivered', cmd.agentId);
-
-        sendMessage({
-            type: 'FORCE_LOGOUT',
-            agentId: cmd.agentId
-        });
-    }
-}
-*/
 function startWhisperForAgent(agentId) {
   startLongPolling(
     handleSupervisorCommand,

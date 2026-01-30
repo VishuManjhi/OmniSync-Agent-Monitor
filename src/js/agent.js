@@ -64,6 +64,7 @@ async function forceLogout() {
 }
 //inIt
 async function initAgentDashboard() {
+    forceLogoutHandled = false;
     let agentId = getAgentId();
     if (!agentId) {
         agentId = window.AGENT_ID;
@@ -335,6 +336,7 @@ function loadMyTickets() {
             }
             cursor.continue();
         } else {
+            tickets.sort((a,b)=> Number(b.issueDateTime) - Number(a.issueDateTime));
             renderMyTickets(tickets);
         }
     };
