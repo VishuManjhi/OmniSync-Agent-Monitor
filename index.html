@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
     <title>Supervisor Dashboard</title>
     <link rel="stylesheet" href="/styles/main.css">
-    <link rel="stylesheet" href="/styles/agent.css">
+    <!--<link rel="stylesheet" href="/styles/agent.css">-->
 </head>
 <body>
 
@@ -25,7 +25,11 @@
   <span id="sse-dot" class="dot offline"></span>
   <span>SSE</span>
   </div>
-  <button id="go-agent-btn" class="nav-btn">Go to Agent Panel</button>
+  <div class="conn-indicator">
+  <span id="lp-dot" class="dot offline"></span>
+  <span>LP</span>
+  </div>
+  <button id="diag-btn" class="nav-btn">Diagnostics</button>
  </div> 
 </header>
 <main class="main-container">
@@ -66,9 +70,16 @@
 
     <!-- Ticket Panel -->
     <section class="ticket-panel">
+       <!-- Supervisor Create Ticket -->
+        <div id="create-ticket-panel" style="margin-bottom:16px;">
+        <h3>Create Ticket</h3>
+       <input type="text" id="new-issue-type" placeholder="Issue type"/>
+       <textarea id="new-description" placeholder="Ticket description"></textarea>
+
+       <button id="create-ticket-btn">Create Ticket</button></div>
+                               
         <h2>Raised Tickets</h2>
         <div id="ticket-list"></div>
-        <h4>Attachments</h4>
         <div id="ticket-attachments"></div>
     </section>
 

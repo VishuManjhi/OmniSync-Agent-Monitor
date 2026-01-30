@@ -2,15 +2,17 @@ import { openDB } from './db.js';
 import { setAgentId, getAgentId } from './utils/sessionStorage.js';
 import { initWebSocket, sendMessage } from './comms/websocket.js';
 import { initBroadcast, broadcastMessage } from './comms/broadcast.js';
+import { startLongPolling } from './comms/longPoll.js';
 
 
-const DEFAULT_AGENT_ID = 'a1';
+const DEFAULT_AGENT_ID = null;
 
 let db = null;
 let currentSession = null;
 let breakInterval = null;
 let selectedAttachFile = null;
 let attachPreviewURL = null;
+let forceLogoutHandled = false;
 attachPreviewURL && URL.revokeObjectURL(attachPreviewURL);
 attachPreviewURL = null;
 
@@ -39,17 +41,42 @@ function setupAttachmentPreview() {
         attachmentPreview.textContent = file.name;
     });
 }
+async function forceLogout() {
+    if (!currentSession) return;
+
+    currentSession.clockOutTime = new Date().toISOString();
+
+    const tx = db.transaction(['agent_sessions'], 'readwrite');
+    tx.objectStore('agent_sessions').put(currentSession);
+
+    currentSession = null;
+
+    updateSessionUI();
+    updateButtons();
+    updateStatusBadge('offline');
+
+    sendMessage({
+        type: 'AGENT_STATUS_CHANGED',
+        agentId: getAgentId()
+    });
+
+    alert('You were force logged out by supervisor');
+}
 //inIt
 async function initAgentDashboard() {
     let agentId = getAgentId();
     if (!agentId) {
-        agentId = DEFAULT_AGENT_ID;
+        agentId = window.AGENT_ID;
         setAgentId(agentId);
     }
+    agentId = getAgentId();
 
     document.getElementById('current-agent-id').textContent = agentId;
 
-    initWebSocket();
+    initWebSocket(handleWSCommand);
+    startLongPolling(handleWSCommand,{
+        agentId: getAgentId()
+    });
 
     db = await openDB();
     await loadCurrentSession(agentId);
@@ -137,6 +164,21 @@ function startBreakTimer() {
             `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
     }, 1000);
 }
+function updateTicket(ticketId, updater) {
+    const tx = db.transaction(['tickets'], 'readwrite');
+    const store = tx.objectStore('tickets');
+
+    store.get(ticketId).onsuccess = (e) => {
+        const ticket = e.target.result;
+        if (!ticket) return;
+
+        updater(ticket);
+        store.put(ticket).onsuccess = () => {
+            loadMyTickets();
+        };
+    };
+}
+
 //sessionLoad
 
 async function loadCurrentSession(agentId) {
@@ -180,6 +222,27 @@ async function loadCurrentSession(agentId) {
         }
     };
 }
+function handleWSMessage(message) {
+    if (!message || !message.type) return;
+
+    switch (message.type) {
+        case 'FORCE_LOGOUT':
+            if (message.agentId === getAgentId()) {
+                console.warn('[AGENT] FORCE_LOGOUT received');
+                forceLogout();
+            }
+            break;
+
+        // future commands 
+        // case 'PAUSE_AGENT':
+        // case 'RESUME_AGENT':
+
+        default:
+            // ignore
+            break;
+    }
+}
+
 //tickets
 function handleTicketSubmit(e) {
     e.preventDefault();
@@ -254,8 +317,6 @@ function handleTicketSubmit(e) {
     } 
 
 }
-
-
 function loadMyTickets() {
     const agentId = getAgentId();
     if (!agentId || !db) return;
@@ -269,7 +330,9 @@ function loadMyTickets() {
     index.openCursor(IDBKeyRange.only(agentId)).onsuccess = (e) => {
         const cursor = e.target.result;
         if (cursor) {
+            if(cursor.value.agentId === agentId){
             tickets.push(cursor.value);
+            }
             cursor.continue();
         } else {
             renderMyTickets(tickets);
@@ -283,17 +346,20 @@ function renderMyTickets(tickets) {
 
     container.innerHTML = tickets.length
         ? tickets.map(t => `
-            <div class="ticket-card">
+            <div class="ticket-card" data-id="${t.ticketId}">
                 <strong>${t.issueType}</strong><br>
                 Status: <b>${t.status}</b><br>
-                <button 
-                    data-id="${t.ticketId}"
-                    ${t.status === 'resolved' ? 'disabled' : ''}>
-                    Mark Resolved
-                </button>
+
+                ${
+                    t.status === 'ASSIGNED'
+                        ? `<button class="start-btn">Start Work</button>`
+                        : t.status === 'IN_PROGRESS'
+                        ? `<button class="resolve-btn">Resolve Ticket</button>`
+                        : ''
+                }
             </div>
         `).join('')
-        : '<p>No tickets raised.</p>';
+        : '<p>No assigned tickets.</p>';
 }
 
 
@@ -304,6 +370,8 @@ async function handleClockIn() {
     if (!agentId) return;
 
     if (currentSession) return;
+
+    forceLogoutHandled = false;
 
     currentSession = {
         sessionID: crypto.randomUUID(),
@@ -334,7 +402,7 @@ async function handleClockIn() {
 function handleClockOut() {
     if (!currentSession) return;
 
-    const agentId = currentSession.agentId; // ✅ snapshot
+    const agentId = currentSession.agentId; //  snapshot
 
     currentSession.clockOutTime = new Date().toISOString();
 
@@ -382,8 +450,6 @@ function handleOnCallToggle() {
          })
     };
 }
-
-
 //brekas
 
 function handleBreakIn() {
@@ -442,10 +508,6 @@ function handleBreakOut() {
         })
     };
 }
-
-
-
-
 function stopBreakTimer() {
     clearInterval(breakInterval);
     breakInterval = null;
@@ -454,6 +516,105 @@ function stopBreakTimer() {
         el.textContent = '00:00:00';
     }
 }
+function handleWSCommand(cmd) {
+    if (!cmd || !cmd.type) return;
+
+    const myId = getAgentId();
+
+    switch (cmd.type) {
+        // force Logout 
+        
+        case 'FORCE_LOGOUT': {
+            if (cmd.agentId !== myId) return;
+
+            // prevent repeat execution
+            if (forceLogoutHandled) {
+                console.log('[AGENT] FORCE_LOGOUT already handled, ignoring');
+                return;
+            }
+
+            forceLogoutHandled = true;
+
+            console.warn('[AGENT] Forced logout by supervisor');
+
+            if (currentSession) {
+                currentSession.clockOutTime = new Date().toISOString();
+                saveSession(currentSession);
+                currentSession = null;
+            }
+
+            updateSessionUI();
+            updateButtons();
+            updateStatusBadge('offline');
+
+            sendMessage({
+                type: 'AGENT_STATUS_CHANGED',
+                agentId: myId,
+                status: 'offline'
+            });
+
+            alert('You have been logged out by supervisor');
+            break;
+        }
+        case 'ASSIGN_TICKET': {
+        if (cmd.agentId !== myId) return;
+
+        console.warn('[AGENT] Ticket assigned by supervisor', cmd.payload);
+
+        const ticket = {
+        ...cmd.payload,
+        agentId: myId,          
+        status: 'ASSIGNED'      
+        };
+
+        const tx = db.transaction(['tickets'], 'readwrite');
+        const store = tx.objectStore('tickets');
+
+        store.put(ticket).onsuccess = () => {
+        console.log('[AGENT] Assigned ticket saved', ticket.ticketId);
+        loadMyTickets();
+        };
+
+        break;
+    }
+
+        // resolution Approved
+        
+        case 'RESOLUTION_APPROVED': {
+            if (cmd.agentId !== myId) return;
+
+            console.warn('[AGENT] Resolution approved for ticket', cmd.ticketId);
+
+            const tx = db.transaction(['tickets'], 'readwrite');
+            const store = tx.objectStore('tickets');
+
+            store.get(cmd.ticketId).onsuccess = (e) => {
+                const ticket = e.target.result;
+                if (!ticket) return;
+
+                // safety check
+                if (ticket.status !== 'RESOLUTION_REQUESTED') {
+                    console.warn('[AGENT] Ticket not in resolvable state');
+                    return;
+                }
+
+                ticket.status = 'RESOLVED';
+                ticket.resolvedAt = Date.now();
+
+                store.put(ticket).onsuccess = () => {
+                    alert(`Ticket ${cmd.ticketId} resolved`);
+                    loadMyTickets();
+                };
+            };
+            break;
+        }
+        // Future commands 
+        default:
+            // ignore unknown commands
+            break;
+    }
+}
+
 //DB
 
 async function saveSession(session) {
@@ -479,10 +640,7 @@ function setupEventHandlers() {
         ?.addEventListener('click', handleBreakOut);
     document.getElementById('on-call-btn')
         ?.addEventListener('click', handleOnCallToggle);
-    document.getElementById('go-supervisor-btn')
-        ?.addEventListener('click', () => {
-    window.location.href = 'index.html';
-    });
+
 
 
     const ticketForm = document.getElementById('ticket-form');
@@ -492,6 +650,43 @@ function setupEventHandlers() {
     }
 
     ticketForm.addEventListener('submit', handleTicketSubmit);
+    const myTickets = document.getElementById('my-tickets');
+
+if (myTickets) {
+    myTickets.addEventListener('click', (e) => {
+        const btn = e.target;
+        const card = btn.closest('.ticket-card');
+        if (!card) return;
+
+        const ticketId = card.dataset.id;
+        console.log('[AGENT] Ticket click:', ticketId, btn.className);
+
+        if (btn.classList.contains('start-btn')) {
+            updateTicket(ticketId, (ticket) => {
+                if (ticket.status !== 'ASSIGNED') return;
+
+                ticket.status = 'IN_PROGRESS';
+                ticket.startedAt = Date.now();
+            });
+        }
+
+        if (btn.classList.contains('resolve-btn')) {
+            updateTicket(ticketId, (ticket) => {
+                if (ticket.status !== 'IN_PROGRESS') return;
+
+                ticket.status = 'RESOLVED';
+                ticket.resolvedAt = Date.now();
+
+                if (ticket.startedAt) {
+                    ticket.workDuration =
+                        ticket.resolvedAt - ticket.startedAt;
+               }
+              });
+          }
+      });
+   }
+
+    
     
 }
 
@@ -501,3 +696,4 @@ document.readyState === 'loading'
     ? document.addEventListener('DOMContentLoaded', initAgentDashboard)
     : initAgentDashboard();
 
+//window.__testHandleWSCommand = handleWSCommand;

@@ -1,5 +1,5 @@
 const DB_NAME = 'restroDB';
-const DB_VERSION = 6;
+const DB_VERSION = 8;
 
 export function openDB() {
     return new Promise((resolve, reject) => {
@@ -32,7 +32,12 @@ export function openDB() {
             if (db.objectStoreNames.contains('tickets')) {
                 db.deleteObjectStore('tickets');
             }
-
+            if (!db.objectStoreNames.contains('agents')){
+                const store = db.createObjectStore('agents',{
+                    keyPath: 'agentId'
+                });
+                store.createIndex('name', 'name',{unique: false});
+            }
             const tickets = db.createObjectStore('tickets', {
                 keyPath: 'ticketId' 
             });

@@ -5,6 +5,9 @@ import { agentCardTimers, highlightedAgentCards } from './utils/uiWeakState.js';
 import { initWebSocket } from './comms/websocket.js';
 import { startSSE } from './comms/sse.js';
 import { updateProtocolLED } from './utils/connectionLED.js';
+import { startLongPolling } from './comms/longPoll.js';
+import { sendMessage } from './comms/websocket.js';
+
 
 
 
@@ -37,7 +40,14 @@ function normalizeSession(s) {
         onCall: s.onCall === true
     };
 }
+/*function forwardForceLogoutToAgent(agentId) {
+    sendMessage({
+        type: 'FORCE_LOGOUT',
+        agentId
+    });
+}
 
+*/
 
 function deriveAgentState(session) {
     if (!session) return 'OFFLINE';
@@ -75,6 +85,9 @@ let db = null;
 let allAgents = [];
 let activeHighlightedCard = null;
 let isWSRefresh = false;
+let ahtWorker = null;
+let selectedTicketId = null;
+let agentNameMap = {};
 
 export async function initialize(database) {
     db = database;
@@ -89,13 +102,23 @@ export async function initialize(database) {
     initWebSocket(handleWSMessage);
 
     startSSE(handleProtocolStatus, renderQueueStats);
+    ahtWorker = new Worker(
+    new URL('./workers/ahtWorker.js', import.meta.url),
+    { type: 'module' }
+    );
 
-
+    ahtWorker.onmessage = (e) => {
+    const { globalAHT, perAgentAHT } = e.data;
+    renderAHT(globalAHT, perAgentAHT);
+    };
     loadSavedFilters();          
     setupFilterHandlers();       
     AgentGridDelegation(); 
-   refreshSupervisorPanel();
-   initWebSocket(handleWSMessage);
+    await loadAgentNames(db);
+    refreshSupervisorPanel();
+    initWebSocket(handleWSMessage);
+    await seedAgentsIfEmpty(db);
+
    
    //setInterval(refreshSupervisorPanel, 5000);
 }
@@ -110,10 +133,7 @@ function loadAgents() {
         const cursor = e.target.result;
         if (cursor) {
             const session = normalizeSession(cursor.value);
-
-            if (session.clockInTime) {
                 sessions.push(session);
-            }
 
             cursor.continue();
         } else {
@@ -128,20 +148,33 @@ function processSessions(sessions) {
 
     sessions.forEach(s => {
         const prev = map.get(s.agentId);
+
+        
         if (!prev) {
             map.set(s.agentId, s);
             return;
         }
+
+        
+        if (prev.sessionID && s.sessionID && prev.sessionID === s.sessionID) {
+            map.set(s.agentId, s);
+            return;
+        }
+
+        
         if (prev.clockOutTime && !s.clockOutTime) {
             map.set(s.agentId, s);
             return;
         }
 
-        const prevTime = new Date(prev.clockInTime || 0).getTime();
-        const currTime = new Date(s.clockInTime || 0).getTime();
+        
+        if (!prev.clockOutTime && !s.clockOutTime) {
+            const prevTime = new Date(prev.clockInTime || 0).getTime();
+            const currTime = new Date(s.clockInTime || 0).getTime();
 
-        if (currTime > prevTime) {
-            map.set(s.agentId, s);
+            if (currTime > prevTime) {
+                map.set(s.agentId, s);
+            }
         }
     });
 
@@ -156,8 +189,6 @@ function processSessions(sessions) {
     renderAgents();
     if (selectedAgentId) renderAgentDetails(selectedAgentId);
 }
-
-
 function renderAgents() {
     const filter = getAllFilters().status;
     let agents = allAgents;
@@ -193,12 +224,22 @@ function AgentGridDelegation() {
     if (!grid) return;
 
     grid.addEventListener('click', (e) => {
+
+        const logoutBtn = e.target.closest('.force-logout-btn');
+        if (logoutBtn) {
+            e.stopPropagation();
+
+            const agentId = logoutBtn.dataset.agentId;
+            initiateWhisper(agentId);   
+            return;
+        }
         const card = e.target.closest('.agent-card');
         if (!card || !grid.contains(card)) return;
 
         handleAgentCardClick(card);
     });
 }
+
 function handleAgentCardClick(cardEl) {
     const agentId = cardEl.dataset.agentId;
     selectedAgentId = agentId;
@@ -225,27 +266,40 @@ function handleAgentCardClick(cardEl) {
 function handleWSMessage(message) {
     console.log('[WS MESSAGE]', message);
 
-    isWSRefresh = true;
+    if (!message || !message.type) return;
 
-    refreshSupervisorPanel();
-    loadTickets();
-    if (message.type === 'TICKET_CREATED') {
-    notifyNewTicket({
-        agentId: message.agentId,
-        issueType: message.issueType
-     });
-    }
-    if (selectedAgentId) {
-        renderAgentDetails(selectedAgentId);
+    switch (message.type) {
+        case 'AGENT_STATUS_CHANGED': {
+            loadAgents();
 
-        setTimeout(() => {
-            loadTicketsForAgent(selectedAgentId);
-            isWSRefresh = false;
-        }, 0);
-    } else {
-        isWSRefresh = false;
+            if (selectedAgentId) {
+                renderAgentDetails(selectedAgentId);
+            }
+            break;
+        }
+
+        case 'TICKET_CREATED':
+        case 'TICKET_UPDATED': {
+            loadTickets();
+
+            if (message.type === 'TICKET_CREATED') {
+                notifyNewTicket({
+                    agentId: message.agentId,
+                    issueType: message.issueType
+                });
+            }
+
+            if (selectedAgentId) {
+                loadTicketsForAgent(selectedAgentId);
+            }
+            break;
+        }
+
+        default:
+            break;
     }
 }
+
 
 function loadTickets() {
     const tx = db.transaction(['tickets'], 'readonly');
@@ -271,6 +325,9 @@ function loadTickets() {
                     time: t.issueDateTime
                 }))
             );
+            if(ahtWorker){
+                ahtWorker.postMessage(tickets);
+            }
 
             renderTickets(tickets);
         }
@@ -286,15 +343,22 @@ function createAgentCard(agent) {
     card.dataset.agentId = agent.agentId;
 
     card.innerHTML = `
-    <strong>${agent.agentId}</strong><br>
-    Status: ${formatStatus(agent.state)}<br>
-    Clock In: ${formatDateTime(agent.clockInTime)}<br>
-    Clock Out: ${formatDateTime(agent.clockOutTime)}<br>
-    <span class="duration">--</span>
-`;
+        <strong>${agentNameMap[agent.agentId] ?? agent.agentId}</strong><br>
+        Status: ${formatStatus(agent.state)}<br>
+        Clock In: ${formatDateTime(agent.clockInTime)}<br>
+        Clock Out: ${formatDateTime(agent.clockOutTime)}<br>
+        <button 
+            class="force-logout-btn"
+            data-agent-id="${agent.agentId}">
+            Force Logout
+        </button>
+
+        <span class="duration">--</span>
+    `;
 
     return card;
 }
+
 async function renderTicketModal(ticket) {
     const content = document.getElementById('ticket-modal-content');
     const attachmentsContainer = document.getElementById('ticket-modal-attachments');
@@ -355,6 +419,7 @@ function renderTickets(tickets) {
     panel.querySelectorAll('.ticket-card').forEach(el => {
     el.addEventListener('click', async () => {
         const ticketId = el.dataset.ticketId;
+        selectedTicketId = ticketId;
         const ticket = tickets.find(t => t.ticketId === ticketId);
         if (!ticket) return;
 
@@ -371,6 +436,7 @@ function renderAgentDetails(agentId) {
 
     container.innerHTML = `
         <strong>Agent ID:</strong> ${agent.agentId}<br>
+        <strong>Agent:</strong> ${agentNameMap[agent.agentId] ?? agent.agentId}<br>
         <strong>Status:</strong> ${formatStatus(agent.state)}<br>
         <strong>Clock In:</strong> ${formatDateTime(agent.clockInTime)}<br>
         <strong>Clock Out:</strong> ${formatDateTime(agent.clockOutTime)}<br>
@@ -428,6 +494,15 @@ function loadTicketsForAgent(agentId) {
     };
 }
 
+function renderAHT(globalAHT, perAgentAHT) {
+    const el = document.getElementById('aht-value');
+    if (el) el.textContent = `${globalAHT}s`;
+
+    console.log('[AHT]', {
+        globalAHT,
+        perAgentAHT
+    });
+}
 function renderAttachments(attachments) {
     const container = document.getElementById('ticket-attachments');
     if (!container) return;
@@ -510,7 +585,7 @@ function renderTicketsInAgentDetails(tickets) {
         });
     });
 }
-//new Notification("Test Notification", { body: "Notification works" })
+//new Notification("Test Notification", { body: "Noti works" })
 
 function notifyNewTicket({ agentId, issueType }) {
     console.log(' notifyNewTicket called', agentId, issueType);
@@ -523,7 +598,6 @@ function notifyNewTicket({ agentId, issueType }) {
         });
     }
 }
-
 async function getAttachmentsForTicket(ticketId) {
     const db = await openDB();
 
@@ -560,7 +634,6 @@ function setupFilterHandlers() {
         renderAgents();
     });
 }
-
 function loadSavedFilters() {
     const filter = getAllFilters().status;
     const select = document.getElementById('status-filter');
@@ -572,7 +645,6 @@ function refreshSupervisorPanel() {
     loadAgents();
     loadTickets();
 }
-
 function formatStatus(type) {
     if(!type) return;
     return type.replace('-', ' ').toUpperCase();
@@ -607,6 +679,105 @@ function formatDuration(ms) {
 function handleProtocolStatus(protocol, status) {
     updateProtocolLED(protocol, status === 'connected');
 }
+/*function handleSupervisorCommand(cmd) {
+    if (!cmd || !cmd.type) return;
+
+    if (cmd.type === 'FORCE_LOGOUT') {
+        console.warn('[LP] Whisper delivered', cmd.agentId);
+
+        sendMessage({
+            type: 'FORCE_LOGOUT',
+            agentId: cmd.agentId
+        });
+    }
+}
+*/
+function startWhisperForAgent(agentId) {
+  startLongPolling(
+    handleSupervisorCommand,
+    { agentId }
+  );
+}
+async function initiateWhisper(agentId) {
+    console.log('[Supervisor] Initiating whisper for', agentId);
+
+    await fetch('http://localhost:3002/lp/whisper', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            type: 'FORCE_LOGOUT',
+            agentId
+        })
+    });
+}
+
+
+function runEventLoopDiagnostic() {
+    console.clear();
+    console.log('%c[DIAG] Sync start', 'color: cyan');
+
+    // Microtask 1
+    Promise.resolve().then(() => {
+        console.log('%c[DIAG] Microtask: Promise.then', 'color: lime');
+    });
+
+    // Microtask 2
+    queueMicrotask(() => {
+        console.log('%c[DIAG] Microtask: queueMicrotask', 'color: lime');
+    });
+
+    // Macrotask 1
+    setTimeout(() => {
+        console.log('%c[DIAG] Macrotask: setTimeout', 'color: orange');
+    }, 0);
+
+    // Macrotask 2 
+    const channel = new MessageChannel();
+    channel.port1.onmessage = () => {
+        console.log('%c[DIAG] Macrotask: MessageChannel', 'color: orange');
+    };
+    channel.port2.postMessage(null);
+
+    console.log('%c[DIAG] Sync end', 'color: cyan');
+}
+async function seedAgentsIfEmpty(db) {
+    const tx = db.transaction(['agents'], 'readwrite');
+    const store = tx.objectStore('agents');
+
+    const countReq = store.count();
+    countReq.onsuccess = () => {
+        if (countReq.result > 0) return;
+
+        store.put({ agentId: 'a1', name: 'Vishu' });
+        store.put({ agentId: 'a2', name: 'Rishika' });
+        store.put({ agentId: 'a3', name: 'Nirma' });
+
+        console.log('[DB] Agent names seeded');
+    };
+}
+async function loadAgentNames(db) {
+    return new Promise((resolve) => {
+        const tx = db.transaction(['agents'], 'readonly');
+        const store = tx.objectStore('agents');
+
+        const map = {};
+
+        store.openCursor().onsuccess = (e) => {
+            const cursor = e.target.result;
+            if (!cursor) {
+                agentNameMap = map;
+                console.log('[Supervisor] Agent names loaded', agentNameMap);
+                resolve();
+                return;
+            }
+
+            map[cursor.key] = cursor.value.name;
+            cursor.continue();
+        };
+    });
+}
+
+
 
 
 
@@ -615,8 +786,93 @@ document.getElementById('close-ticket-modal')
 
 document.getElementById('ticket-modal-backdrop')
     ?.addEventListener('click', closeTicketModal);
-document.getElementById('go-agent-btn')
-  ?.addEventListener('click', () => {window.location.href = 'agent.html';});
+document.getElementById('diag-btn')
+  ?.addEventListener('click', runEventLoopDiagnostic);
+document.getElementById('create-ticket-btn')
+  ?.addEventListener('click', () => {
+    const issueType = document.getElementById('new-issue-type').value.trim();
+    const description = document.getElementById('new-description').value.trim();
+
+    if (!issueType) {
+      alert('Issue type required');
+      return;
+    }
+
+    const ticket = {
+      ticketId: crypto.randomUUID(),
+      issueType,
+      description,
+      status: 'UNASSIGNED',
+      agentId: null,
+      assignedAgentId: null,
+      issueDateTime: Date.now(),
+      resolvedAt: null,
+      attachments: []
+    };
+
+    const tx = db.transaction(['tickets'], 'readwrite');
+    const store = tx.objectStore('tickets');
+
+    store.add(ticket).onsuccess = () => {
+      console.log('[SUPERVISOR] Ticket created', ticket);
+
+      // clear form
+      document.getElementById('new-issue-type').value = '';
+      document.getElementById('new-description').value = '';
+
+      loadTickets(); // refresh Raised Tickets
+    };
+});
+document.getElementById('create-ticket-btn')
+  ?.addEventListener('click', async () => {
+
+    if (!selectedAgentId) {
+      alert('Select an agent first');
+      return;
+    }
+
+    const issueType =
+      document.getElementById('new-issue-type').value.trim();
+    const description =
+      document.getElementById('new-description').value.trim();
+
+    if (!issueType) {
+      alert('Issue type required');
+      return;
+    }
+
+    const ticket = {
+      ticketId: crypto.randomUUID(),
+      issueType,
+      description,
+      status: 'ASSIGNED',
+      agentId: selectedAgentId,
+      assignedAgentId: selectedAgentId,
+      issueDateTime: Date.now(),
+      resolvedAt: null,
+      attachments: []
+    };
+
+    const tx = db.transaction(['tickets'], 'readwrite');
+    const store = tx.objectStore('tickets');
+
+    store.add(ticket).onsuccess = () => {
+      console.log('[SUPERVISOR] Ticket created & assigned', ticket);
+
+      //Notify agent 
+      sendMessage({
+        type: 'ASSIGN_TICKET',
+        agentId: selectedAgentId,
+        payload: ticket
+      });
+      document.getElementById('new-issue-type').value = '';
+      document.getElementById('new-description').value = '';
+
+      loadTickets();
+      loadTicketsForAgent(selectedAgentId);
+    };
+});
+
 
 
 
