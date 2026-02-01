@@ -2,26 +2,7 @@ import { updateProtocolLED } from '../utils/connectionLED.js';
 
 let socket = null;
 let listeners = new Set();
-let pollInterval = null;
 
-/**
- * Short Polling (Service Ping)
- * Checks WS health every 5s
- */
-function startShortPolling() {
-    if (pollInterval) return;
-
-    pollInterval = setInterval(() => {
-        const isAlive =
-            socket &&
-            socket.readyState === WebSocket.OPEN;
-
-        updateProtocolLED('ws', isAlive);
-        updateProtocolLED('sp', true);
-
-        console.log('[SP] Checked WS state:', isAlive);
-    }, 5000);
-}
 
 export function initWebSocket(onMessage) {
     if (typeof onMessage === 'function') {
@@ -31,7 +12,6 @@ export function initWebSocket(onMessage) {
     if (!socket) {
         socket = new WebSocket('ws://localhost:8080');
 
-        startShortPolling();
         updateProtocolLED('ws', false);
 
         socket.onopen = () => {

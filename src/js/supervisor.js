@@ -8,7 +8,8 @@ import { updateProtocolLED } from './utils/connectionLED.js';
 import { startLongPolling } from './comms/longPoll.js';
 import { sendMessage } from './comms/websocket.js';
 import './utils/memoryDebug.js';
-
+import * as offlineQueue from './offlineQueue.js';
+import { queueAction } from './offlineQueue.js';
 
 
 
@@ -61,6 +62,25 @@ function deriveAgentState(session) {
 
     return 'ACTIVE';
 }
+function updateAgentStateMap(session) {
+    if (!session || !session.agentId) return;
+
+    const status = deriveAgentState(session);
+    const now = Date.now();
+
+    const prev = agentStateMap.get(session.agentId);
+
+    if (!prev || prev.status !== status) {
+        agentStateMap.set(session.agentId, {
+            status,
+            since: now
+        });
+    }
+
+}
+
+
+
 const queueMetrics = {
     queueDepth: 0,
     waitingCalls: 0,
@@ -80,7 +100,13 @@ function renderQueueStats(stats) {
 }
 
 
-//window.__debug = { agentCardTimers, highlightedAgentCards }; //debug.agentCardTimers
+window.__debug = { agentCardTimers, highlightedAgentCards }; //debug.agentCardTimers
+
+const agentStateMap = new Map();
+window.__agentStateMap = agentStateMap;
+const incidentSet = new Set();
+window.__incidentSet = incidentSet;
+
 let selectedAgentId = null;
 let db = null;
 let allAgents = [];
@@ -89,6 +115,7 @@ let isWSRefresh = false;
 let ahtWorker = null;
 let selectedTicketId = null;
 let agentNameMap = {};
+
 
 export async function initialize(database) {
     db = database;
@@ -184,6 +211,9 @@ function processSessions(sessions) {
         clockOutTime: session.clockOutTime,
         session
     }));
+    allAgents.forEach(agent => {
+            updateAgentStateMap(agent.session)
+        })
 
     renderAgents();
     if (selectedAgentId) renderAgentDetails(selectedAgentId);
@@ -282,6 +312,12 @@ function handleWSMessage(message) {
             loadTickets();
 
             if (message.type === 'TICKET_CREATED') {
+
+                if (message.issueType) {
+                    incidentSet.add(message.issueType);
+                    console.log('[IncidentSet]', [...incidentSet]);
+                }
+
                 notifyNewTicket({
                     agentId: message.agentId,
                     issueType: message.issueType
@@ -298,8 +334,6 @@ function handleWSMessage(message) {
             break;
     }
 }
-
-
 function loadTickets() {
     const tx = db.transaction(['tickets'], 'readonly');
     const store = tx.objectStore('tickets');
@@ -593,13 +627,11 @@ function notifyNewTicket({ agentId, issueType }) {
     if (Notification.permission === "granted") {
         new Notification("New Ticket Raised", {
             body: `Agent ${agentId} • ${issueType || 'Issue'}`,
-            icon: "/favicon.ico" // optional
         });
     }
 }
 async function getAttachmentsForTicket(ticketId) {
     const db = await openDB();
-
     return new Promise((resolve) => {
         const tx = db.transaction(['attachments'], 'readonly');
         const store = tx.objectStore('attachments');
@@ -688,15 +720,25 @@ function startWhisperForAgent(agentId) {
 async function initiateWhisper(agentId) {
     console.log('[Supervisor] Initiating whisper for', agentId);
 
-    await fetch('http://localhost:3002/lp/whisper', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-            type: 'FORCE_LOGOUT',
-            agentId
-        })
-    });
+    const action = 'FORCE_LOGOUT';
+    const payload = { agentId };
+
+    try {
+        await fetch('http://localhost:3002/lp/whisper', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                type: action,
+                agentId
+            })
+        });
+    } catch (err) {
+        console.warn('[Supervisor] Offline / request failed, queuing FORCE_LOGOUT');
+
+        await queueAction(action, payload);
+    }
 }
+
 
 
 function runEventLoopDiagnostic() {

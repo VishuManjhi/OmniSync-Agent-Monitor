@@ -1,5 +1,5 @@
 const DB_NAME = 'restroDB';
-const DB_VERSION = 8;
+const DB_VERSION = 9;
 
 export function openDB() {
     return new Promise((resolve, reject) => {
@@ -54,6 +54,15 @@ export function openDB() {
                 attachments.createIndex('ticketId', 'ticketId', { unique: false });
                 attachments.createIndex('agentId', 'agentId', { unique: false });
                 attachments.createIndex('createdAt', 'createdAt', { unique: false });
+            }
+            if (!db.objectStoreNames.contains('offline_queue')) {
+              const queue = db.createObjectStore('offline_queue', {
+              keyPath: 'idempotencyKey'
+             });
+
+              queue.createIndex('synced', 'synced', { unique: false });
+              queue.createIndex('createdAt', 'createdAt', { unique: false });
+              queue.createIndex('action', 'action', { unique: false });
             }
         };
     });

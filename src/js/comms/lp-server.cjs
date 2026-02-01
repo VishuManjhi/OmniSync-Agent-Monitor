@@ -9,16 +9,18 @@ const server = http.createServer((req, res) => {
     // CORS
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, idempotency-key');
 
     if (req.method === 'OPTIONS') {
-        res.writeHead(204);
-        return res.end();
+     res.writeHead(204, {
+    'Access-Control-Allow-Origin': '*',
+    'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+    'Access-Control-Allow-Headers': 'Content-Type, idempotency-key'
+     });
+     return res.end();
     }
 
-    /* ============================
-       1️⃣ Agent Long Poll (GET)
-    ============================ */
+       //Agent Long Poll (GET)
     if (req.method === 'GET' && req.url === '/lp/commands') {
         console.log('[LP] Agent polling');
 
