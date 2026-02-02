@@ -42,15 +42,6 @@ function normalizeSession(s) {
         onCall: s.onCall === true
     };
 }
-/*function forwardForceLogoutToAgent(agentId) {
-    sendMessage({
-        type: 'FORCE_LOGOUT',
-        agentId
-    });
-}
-
-*/
-
 function deriveAgentState(session) {
     if (!session) return 'OFFLINE';
     if (session.clockOutTime) return 'OFFLINE';
@@ -78,9 +69,6 @@ function updateAgentStateMap(session) {
     }
 
 }
-
-
-
 const queueMetrics = {
     queueDepth: 0,
     waitingCalls: 0,
@@ -129,7 +117,22 @@ export async function initialize(database) {
     }
     initWebSocket(handleWSMessage);
 
-    startSSE(handleProtocolStatus, renderQueueStats);
+    startSSE(handleProtocolStatus, async (stats) => {
+    const [waitingCalls, activeAgents, slaPercent] = await Promise.all([
+        calculateWaitingCalls(db),
+        calculateActiveAgents(db),
+        calculateSLAPercent(db)
+    ]);
+
+    renderQueueStats({
+        ...stats,                 // SIM
+        waitingCalls,             //r
+        activeAgents,             //r
+        slaPercent                //r
+     });
+    });
+
+
     ahtWorker = new Worker(
     new URL('./workers/ahtWorker.js', import.meta.url),
     { type: 'module' }
@@ -366,6 +369,98 @@ function loadTickets() {
         }
     };
 }
+// Demo SLA threshold: 30 minutes
+const SLA_THRESHOLD_MS = 30 * 60 * 1000;
+
+async function calculateSLAPercent(db) {
+    const tx = db.transaction(['tickets'], 'readonly');
+    const store = tx.objectStore('tickets');
+
+    let resolvedCount = 0;
+    let slaMetCount = 0;
+
+    return new Promise((resolve) => {
+        store.openCursor().onsuccess = (e) => {
+            const cursor = e.target.result;
+
+            if (!cursor) {
+                // no resolved tickets → 100% SLA for demo stability
+                if (resolvedCount === 0) {
+                    resolve(100);
+                } else {
+                    resolve(
+                        Math.round((slaMetCount / resolvedCount) * 100)
+                    );
+                }
+                return;
+            }
+
+            const ticket = cursor.value;
+
+            // Only resolved tickets count for SLA
+            if (
+                ticket.status === 'RESOLVED' &&
+                ticket.issueDateTime &&
+                ticket.resolvedAt
+            ) {
+                resolvedCount++;
+
+                const resolutionTime =
+                    ticket.resolvedAt - ticket.issueDateTime;
+
+                if (resolutionTime <= SLA_THRESHOLD_MS) {
+                    slaMetCount++;
+                }
+            }
+
+            cursor.continue();
+        };
+    });
+}
+async function calculateWaitingCalls(db) {
+    const tx = db.transaction(['tickets'], 'readonly');
+    const store = tx.objectStore('tickets');
+
+    let count = 0;
+
+    return new Promise((resolve) => {
+        store.openCursor().onsuccess = (e) => {
+            const cursor = e.target.result;
+            if (!cursor) return resolve(count);
+
+            const ticket = cursor.value;
+
+            // tickets not yet resolved are "waiting"
+            if (ticket.status !== 'RESOLVED') {
+                count++;
+            }
+
+            cursor.continue();
+        };
+    });
+}
+async function calculateActiveAgents(db) {
+    const tx = db.transaction(['agent_sessions'], 'readonly');
+    const store = tx.objectStore('agent_sessions');
+
+    let active = new Set();
+
+    return new Promise((resolve) => {
+        store.openCursor().onsuccess = (e) => {
+            const cursor = e.target.result;
+            if (!cursor) return resolve(active.size);
+
+            const session = cursor.value;
+
+            if (!session.clockOutTime) {
+                active.add(session.agentId);
+            }
+
+            cursor.continue();
+        };
+    });
+}
+
 
 
 
@@ -432,34 +527,88 @@ async function renderTicketModal(ticket) {
 }
 
 function renderTickets(tickets) {
-    const panel = document.getElementById('ticket-list');
-    if (!panel) return;
+  const panel = document.getElementById('ticket-list');
+  if (!panel) return;
 
-    const latest = tickets.slice(0, 7);
+  const latest = tickets.slice(0, 7);
 
-    panel.innerHTML = latest.map(t => `
-    <div 
-        class="ticket-card"
-        data-ticket-id="${t.ticketId}"
-        style="cursor:pointer">  
-        <strong>Agent:</strong> ${t.agentId}<br>
-        <strong>Issue:</strong> ${formatIssueType(t.issueType)}<br>
-        <strong>Status:</strong> ${t.status}<br>
-        <small>${formatDateTime(t.issueDateTime)}</small>
-        <p>${t.description || ''}</p>
-     </div>
-    `).join('');
-    panel.querySelectorAll('.ticket-card').forEach(el => {
-    el.addEventListener('click', async () => {
-        const ticketId = el.dataset.ticketId;
-        selectedTicketId = ticketId;
-        const ticket = tickets.find(t => t.ticketId === ticketId);
-        if (!ticket) return;
+  // ---------- RENDER ----------
+  panel.innerHTML = latest.map(t => `
+    <div
+      class="ticket-card"
+      data-ticket-id="${t.ticketId}"
+      style="cursor:pointer"
+    >
+      <strong>Agent:</strong> ${t.agentId ?? '—'}<br>
+      <strong>Issue:</strong> ${formatIssueType(t.issueType)}<br>
+      <strong>Status:</strong> ${t.status}<br>
+      <small>${formatDateTime(t.issueDateTime)}</small>
+      <p>${t.description || ''}</p>
 
-        await renderTicketModal(ticket);
-     });
-    });
+      ${
+        t.status === 'RESOLUTION_REQUESTED'
+          ? `
+            <div class="supervisor-actions">
+              <button class="approve-btn">Approve</button>
+              <button class="reject-btn">Reject</button>
+            </div>
+          `
+          : ''
+      }
+    </div>
+  `).join('');
+
+  // ---------- EVENTS (DELEGATION) ----------
+  panel.onclick = async (e) => {
+    const approveBtn = e.target.closest('.approve-btn');
+    const rejectBtn = e.target.closest('.reject-btn');
+    const card = e.target.closest('.ticket-card');
+
+    if (!card) return;
+
+    const ticketId = card.dataset.ticketId;
+    const ticket = tickets.find(t => t.ticketId === ticketId);
+    if (!ticket) return;
+
+    /* ===== APPROVE ===== */
+    if (approveBtn) {
+      e.preventDefault();
+      e.stopPropagation();
+
+      console.warn('[SUPERVISOR] Approving ticket', ticketId);
+
+      sendMessage({
+        type: 'RESOLUTION_APPROVED',
+        ticketId,
+        agentId: ticket.agentId
+      });
+
+      loadTickets(); // refresh from DB
+      return;
+    }
+
+    /* ===== REJECT ===== */
+    if (rejectBtn) {
+      e.preventDefault();
+      e.stopPropagation();
+
+      console.warn('[SUPERVISOR] Rejecting ticket', ticketId);
+
+      updateTicket(ticketId, (t) => {
+        if (t.status !== 'RESOLUTION_REQUESTED') return;
+        t.status = 'IN_PROGRESS';
+      });
+
+      loadTickets();
+      return;
+    }
+
+    /* ===== NORMAL CLICK ===== */
+    selectedTicketId = ticketId;
+    await renderTicketModal(ticket);
+  };
 }
+
 function renderAgentDetails(agentId) {
     const agent = allAgents.find(a => a.agentId === agentId);
     if (!agent) return;
@@ -718,26 +867,31 @@ function startWhisperForAgent(agentId) {
   );
 }
 async function initiateWhisper(agentId) {
-    console.log('[Supervisor] Initiating whisper for', agentId);
+  console.log('[Supervisor] Initiating whisper for:', agentId);
 
-    const action = 'FORCE_LOGOUT';
-    const payload = { agentId };
+  const command = {
+    type: 'FORCE_LOGOUT',
+    agentId
+  };
 
-    try {
-        await fetch('http://localhost:3002/lp/whisper', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                type: action,
-                agentId
-            })
-        });
-    } catch (err) {
-        console.warn('[Supervisor] Offline / request failed, queuing FORCE_LOGOUT');
+  try {
+    // Online, best-effort whisper
+    await fetch('http://localhost:3002/lp/whisper', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(command)
+    });
 
-        await queueAction(action, payload);
-    }
+  } catch (err) {
+    console.warn(
+      '[Supervisor] Offline / request failed, queuing FORCE_LOGOUT'
+    );
+
+    // queue FULL command
+    await queueAction(command);
+  }
 }
+
 
 
 

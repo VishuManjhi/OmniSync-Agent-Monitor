@@ -1,5 +1,6 @@
 import { generateIdempotencyKey } from './utils/idempotency.js';
 
+
 let db = null;
 let isOnline = navigator.onLine;
 let replayInProgress = false;

@@ -15,6 +15,8 @@ let attachPreviewURL = null;
 let forceLogoutHandled = false;
 attachPreviewURL && URL.revokeObjectURL(attachPreviewURL);
 attachPreviewURL = null;
+let lastCompletedSession = null;
+
 
 
 function setupAttachmentPreview() {
@@ -42,26 +44,30 @@ function setupAttachmentPreview() {
     });
 }
 async function forceLogout() {
-    if (!currentSession) return;
-
-    currentSession.clockOutTime = new Date().toISOString();
-
-    const tx = db.transaction(['agent_sessions'], 'readwrite');
-    tx.objectStore('agent_sessions').put(currentSession);
-
+    const session = currentSession;
     currentSession = null;
 
     updateSessionUI();
     updateButtons();
     updateStatusBadge('offline');
 
+    if (session) {
+        session.clockOutTime = Date.now();
+
+        const tx = db.transaction(['agent_sessions'], 'readwrite');
+        tx.objectStore('agent_sessions').put(session);
+        await new Promise(res => tx.oncomplete = res);
+    }
+
     sendMessage({
         type: 'AGENT_STATUS_CHANGED',
-        agentId: getAgentId()
+        agentId: getAgentId(),
+        status: 'offline'
     });
 
     alert('You were force logged out by supervisor');
 }
+
 //inIt
 async function initAgentDashboard() {
     forceLogoutHandled = false;
@@ -101,7 +107,8 @@ function deriveSessionStatus(session) {
     return 'active';
 }
 function updateSessionUI() {
-    if (!currentSession) {
+    const session = currentSession || lastCompletedSession;
+    if (!session) {
         document.getElementById('clock-in-time').textContent = '--:--:--';
         document.getElementById('session-status').textContent = 'Not Clocked In';
         document.getElementById('break-duration').textContent = '00:00:00';
@@ -109,17 +116,16 @@ function updateSessionUI() {
     }
 
     document.getElementById('clock-in-time').textContent =
-    currentSession.clockInTime
-        ? new Date(currentSession.clockInTime).toLocaleTimeString()
+     session.clockInTime
+        ? new Date(session.clockInTime).toLocaleTimeString()
         : '--:--:--';
 
-    const status = deriveSessionStatus(currentSession);
+    const status = deriveSessionStatus(session);
 
      document.getElementById('session-status').textContent =
      status.replace('-', ' ').toUpperCase();
 
 }
-
 function updateButtons() {
     const active = !!currentSession;
     const status = deriveSessionStatus(currentSession);
@@ -130,7 +136,6 @@ function updateButtons() {
     document.getElementById('clock-out-btn').disabled = !active || onBreak;
     document.getElementById('break-in-btn').disabled = !active || onBreak;
     document.getElementById('break-out-btn').disabled = !onBreak;
-
 }
 
 function updateStatusBadge(status) {
@@ -141,7 +146,6 @@ function updateStatusBadge(status) {
         badge.textContent = 'OFFLINE';
         return;
     }
-
     badge.textContent = String(status).toUpperCase();
 }
 
@@ -153,7 +157,7 @@ function startBreakTimer() {
         const lastBreak = currentSession?.breaks?.at(-1);
         if (!lastBreak || lastBreak.breakOut) return;
 
-        const start = new Date(lastBreak.breakIn).getTime();
+        const start = lastBreak.breakIn();
         const now = Date.now();
         const diff = now - start;
 
@@ -171,12 +175,35 @@ function updateTicket(ticketId, updater) {
 
     store.get(ticketId).onsuccess = (e) => {
         const ticket = e.target.result;
-        if (!ticket) return;
+        console.log('[AGENT] Fetched ticket from DB:', ticket);
 
-        updater(ticket);
-        store.put(ticket).onsuccess = () => {
-            loadMyTickets();
-        };
+        if (!ticket) {
+        console.error('[AGENT] Ticket NOT FOUND in IndexedDB:', ticketId);
+        return;
+     }
+
+     updater(ticket);
+
+     store.put(ticket).onsuccess = () => {
+      console.log('[AGENT] Ticket updated & saved:', ticketId, ticket.status);
+
+     sendMessage({
+        type: 'TICKET_UPDATED',
+        ticketId: ticket.ticketId,
+        agentId: ticket.agentId,
+        status: ticket.status
+     });
+
+     broadcastMessage({
+        type: 'TICKET_UPDATED',
+        ticketId: ticket.ticketId,
+        agentId: ticket.agentId,
+        status: ticket.status
+     });
+
+     loadMyTickets();
+     };
+
     };
 }
 
@@ -263,7 +290,7 @@ function handleTicketSubmit(e) {
         agentId: getAgentId(),
         issueType: form.get('issueType'),
         description: form.get('description'),
-        status: form.get('status'),
+        status: 'IN_PROGRESS',
         issueDateTime: Date.now(),
         resolvedAt: null,
         callDuration: Number(form.get('callDuration')) || null,
@@ -347,16 +374,19 @@ function renderMyTickets(tickets) {
     if (!container) return;
 
     container.innerHTML = tickets.length
-        ? tickets.map(t => `
+        ? tickets.map(t => 
+            `
             <div class="ticket-card" data-id="${t.ticketId}">
-                <strong>${t.issueType}</strong><br>
+                <strong>${t.issueType}</strong><br> 
                 Status: <b>${t.status}</b><br>
 
                 ${
                     t.status === 'ASSIGNED'
                         ? `<button class="start-btn">Start Work</button>`
                         : t.status === 'IN_PROGRESS'
-                        ? `<button class="resolve-btn">Resolve Ticket</button>`
+                        ? `<button class="resolve-btn">Resolve</button>`
+                        : t.status === 'RESOLUTION_REQUESTED'
+                        ? `<button class="resolve-btn">Waiting For Approval</button>`
                         : ''
                 }
             </div>
@@ -378,7 +408,7 @@ async function handleClockIn() {
     currentSession = {
         sessionID: crypto.randomUUID(),
         agentId,
-        clockInTime: new Date().toISOString(),
+        clockInTime: Date.now(),    
         clockOutTime: null,
         breaks: [],
         onCall: false 
@@ -406,17 +436,17 @@ function handleClockOut() {
 
     const agentId = currentSession.agentId; //  snapshot
 
-    currentSession.clockOutTime = new Date().toISOString();
+    currentSession.clockOutTime = Date.now();
 
     const tx = db.transaction(['agent_sessions'], 'readwrite');
     const store = tx.objectStore('agent_sessions');
 
     store.put(currentSession).onsuccess = () => {
-        currentSession = null;
-
+        lastCompletedSession = { ...currentSession };
         updateSessionUI();
         updateButtons();
         updateStatusBadge('offline');
+        currentSession = null;
 
         sendMessage({
             type: 'AGENT_STATUS_CHANGED',
@@ -463,7 +493,7 @@ function handleBreakIn() {
     if (lastBreak && !lastBreak.breakOut) return;
 
     currentSession.breaks.push({
-        breakIn: new Date().toISOString(),
+        breakIn: Date.now(),
         breakOut: null
     });
 
@@ -491,7 +521,7 @@ function handleBreakOut() {
     const lastBreak = currentSession.breaks.at(-1);
     if (!lastBreak || lastBreak.breakOut) return;
 
-    lastBreak.breakOut = new Date().toISOString();
+    lastBreak.breakOut = Date.now();
 
     const tx = db.transaction(['agent_sessions'], 'readwrite');
     tx.objectStore('agent_sessions').put(currentSession).onsuccess = () => {
@@ -518,7 +548,7 @@ function stopBreakTimer() {
         el.textContent = '00:00:00';
     }
 }
-function handleWSCommand(cmd) {
+async function handleWSCommand(cmd) {
     if (!cmd || !cmd.type) return;
 
     const myId = getAgentId();
@@ -538,24 +568,7 @@ function handleWSCommand(cmd) {
             forceLogoutHandled = true;
 
             console.warn('[AGENT] Forced logout by supervisor');
-
-            if (currentSession) {
-                currentSession.clockOutTime = new Date().toISOString();
-                saveSession(currentSession);
-                currentSession = null;
-            }
-
-            updateSessionUI();
-            updateButtons();
-            updateStatusBadge('offline');
-
-            sendMessage({
-                type: 'AGENT_STATUS_CHANGED',
-                agentId: myId,
-                status: 'offline'
-            });
-
-            alert('You have been logged out by supervisor');
+            await forceLogout();
             break;
         }
         case 'ASSIGN_TICKET': {
@@ -566,7 +579,8 @@ function handleWSCommand(cmd) {
         const ticket = {
         ...cmd.payload,
         agentId: myId,          
-        status: 'ASSIGNED'      
+        status: 'ASSIGNED',  
+        assignedBy: 'SUPERVISOR'    
         };
 
         const tx = db.transaction(['tickets'], 'readwrite');
@@ -578,38 +592,37 @@ function handleWSCommand(cmd) {
         };
 
         break;
-    }
-
-        // resolution Approved
-        
-        case 'RESOLUTION_APPROVED': {
-            if (cmd.agentId !== myId) return;
-
-            console.warn('[AGENT] Resolution approved for ticket', cmd.ticketId);
-
-            const tx = db.transaction(['tickets'], 'readwrite');
-            const store = tx.objectStore('tickets');
-
-            store.get(cmd.ticketId).onsuccess = (e) => {
-                const ticket = e.target.result;
-                if (!ticket) return;
-
-                // safety check
-                if (ticket.status !== 'RESOLUTION_REQUESTED') {
-                    console.warn('[AGENT] Ticket not in resolvable state');
-                    return;
-                }
-
-                ticket.status = 'RESOLVED';
-                ticket.resolvedAt = Date.now();
-
-                store.put(ticket).onsuccess = () => {
-                    alert(`Ticket ${cmd.ticketId} resolved`);
-                    loadMyTickets();
-                };
-            };
-            break;
         }
+        case 'RESOLUTION_APPROVED': {
+        if (cmd.agentId !== myId) break;
+
+        console.warn('[AGENT] Resolution approved for ticket', cmd.ticketId);
+
+        const tx = db.transaction(['tickets'], 'readwrite');
+        const store = tx.objectStore('tickets');
+
+        store.get(cmd.ticketId).onsuccess = (e) => {
+        const ticket = e.target.result;
+     if (!ticket) return;
+
+     // safety check
+     if (ticket.status !== 'RESOLUTION_REQUESTED') {
+      console.warn('[AGENT] Ticket not in resolvable state');
+      return;
+     }
+
+     ticket.status = 'RESOLVED';
+     ticket.resolvedAt = Date.now();
+
+     store.put(ticket).onsuccess = () => {
+      console.log('[AGENT] Ticket resolved after approval', ticket.ticketId);
+      loadMyTickets();
+     };
+     };
+
+     break;
+     }
+
         // Future commands 
         default:
             // ignore unknown commands
@@ -652,11 +665,13 @@ function setupEventHandlers() {
     }
 
     ticketForm.addEventListener('submit', handleTicketSubmit);
+    
+    
     const myTickets = document.getElementById('my-tickets');
-
-if (myTickets) {
-    myTickets.addEventListener('click', (e) => {
-        const btn = e.target;
+    if (myTickets) {
+        myTickets.addEventListener('click', (e) => {
+        const btn = e.target.closest('button');
+        if(!btn) return;
         const card = btn.closest('.ticket-card');
         if (!card) return;
 
@@ -673,24 +688,37 @@ if (myTickets) {
         }
 
         if (btn.classList.contains('resolve-btn')) {
-            updateTicket(ticketId, (ticket) => {
-                if (ticket.status !== 'IN_PROGRESS') return;
+         console.log('[Agent] Resolve Button Detected');
 
-                ticket.status = 'RESOLVED';
-                ticket.resolvedAt = Date.now();
+         updateTicket(ticketId, (ticket) => {
+          if (ticket.status === 'RESOLVED') return;
 
-                if (ticket.startedAt) {
-                    ticket.workDuration =
-                        ticket.resolvedAt - ticket.startedAt;
-               }
-              });
+          // Supervisor-assigned → approval required
+          if (ticket.assignedBy === 'SUPERVISOR') {
+           if (!ticket.startedAt) {
+            ticket.startedAt = ticket.issueDateTime;
+            }
+
+            ticket.status = 'RESOLUTION_REQUESTED';
+            ticket.resolutionRequestedAt = Date.now();
+           return;
           }
-      });
-   }
+
+         //Agent-raised → resolve directly
+         ticket.status = 'RESOLVED';
+         ticket.resolvedAt = Date.now();
+         });
+
+        }
+    });  
+  }
+}        
+    
+    
 
     
     
-}
+
 
 //boot
 

@@ -1,100 +1,131 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-    <title>Supervisor Dashboard</title>
-    <link rel="stylesheet" href="/styles/main.css">
-    <!--<link rel="stylesheet" href="/styles/agent.css">-->
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Supervisor Dashboard</title>
+
+  <link rel="stylesheet" href="/styles/main.css">
+
+  <!-- Heap Widget CSS -->
+  <style>
+    .heap-widget {
+      position: fixed;
+      bottom: 20px;
+      right: 20px;
+      width: 240px;
+      padding: 12px;
+
+      background: linear-gradient(180deg, #0f172a, #020617);
+      border-radius: 14px;
+
+      box-shadow:
+        0 10px 30px rgba(0,0,0,0.6),
+        inset 0 0 0 1px rgba(255,255,255,0.06);
+
+      z-index: 9998;
+      pointer-events: none; /* so it never blocks clicks */
+    }
+
+    .heap-title {
+      font-size: 12px;
+      font-weight: 600;
+      color: #38bdf8;
+      margin-bottom: 6px;
+      letter-spacing: 0.04em;
+    }
+  </style>
 </head>
+
 <body>
 
+<!-- ================= HEADER ================= -->
 <header class="header"> 
-    <h1>restroboard</h1>
- <div class="connection-status">
-  <div class="conn-indicator">
-    <span id="ws-dot" class="dot offline"></span>
-    <span>WS</span>
-  </div>
+  <h1>restroboard</h1>
 
-  <div class="conn-indicator">
-    <span id="sp-dot" class="dot offline"></span>
-    <span>SP</span>
+  <div class="connection-status">
+    <div class="conn-indicator">
+      <span id="ws-dot" class="dot offline"></span>
+      <span>WS</span>
+    </div>
+
+    <div class="conn-indicator">
+      <span id="sp-dot" class="dot offline"></span>
+      <span>SP</span>
+    </div>
+
+    <div class="conn-indicator">
+      <span id="sse-dot" class="dot offline"></span>
+      <span>SSE</span>
+    </div>
+
+    <div class="conn-indicator">
+      <span id="lp-dot" class="dot offline"></span>
+      <span>LP</span>
+    </div>
+
+    <button id="diag-btn" class="nav-btn">Diagnostics</button>
   </div> 
-  <div class="conn-indicator">
-  <span id="sse-dot" class="dot offline"></span>
-  <span>SSE</span>
-  </div>
-  <div class="conn-indicator">
-  <span id="lp-dot" class="dot offline"></span>
-  <span>LP</span>
-  </div>
-  <button id="diag-btn" class="nav-btn">Diagnostics</button>
- </div> 
 </header>
+
+<!-- ================= MAIN CONTENT ================= -->
 <main class="main-container">
 
-    <!-- Filters -->
-    <section class="filter-section">
-        <label for="status-filter">Filter by Status:</label>
-        <select id="status-filter">
-            <option value="">All</option>
-            <option value="active">Active</option>
-            <option value="on-call">On Call</option>
-            <option value="on-break">On Break</option>
-            <option value="offline">Offline</option>
-        </select>
+  <!-- Filters -->
+  <section class="filter-section">
+    <label for="status-filter">Filter by Status:</label>
+    <select id="status-filter">
+      <option value="">All</option>
+      <option value="active">Active</option>
+      <option value="on-call">On Call</option>
+      <option value="on-break">On Break</option>
+      <option value="offline">Offline</option>
+    </select>
 
-        <button id="clear-filters-btn">Clear Filters</button>
-    </section>
+    <button id="clear-filters-btn">Clear Filters</button>
+  </section>
 
-    <!-- Agent Grid -->
-    <section>
-        <h2>Agents</h2>
-        <div id="agent-grid"></div>
-    </section>
-    <section id="agent-details">
-     <h3>Agent Details</h3>
+  <!-- Agents -->
+  <section>
+    <h2>Agents</h2>
+    <div id="agent-grid"></div>
+  </section>
 
-     <!-- Agent basic info -->
-     <div id="agent-info">
-      Click an agent
-     </div>
+  <!-- Agent Details -->
+  <section id="agent-details">
+    <h3>Agent Details</h3>
+    <div id="agent-info">Click an agent</div>
+    <div id="agent-tickets"></div>
+  </section>
 
-     <!-- Agent tickets (lazy loaded) -->
-     <div id="agent-tickets">
-     </div>
-     </section>
+  <!-- Ticket Panel -->
+  <section class="ticket-panel">
+    <div id="create-ticket-panel" style="margin-bottom:16px;">
+      <h3>Create Ticket</h3>
+      <input type="text" id="new-issue-type" placeholder="Issue type"/>
+      <textarea id="new-description" placeholder="Ticket description"></textarea>
+      <button id="create-ticket-btn">Create Ticket</button>
+    </div>
 
+    <h2>Raised Tickets</h2>
+    <div id="ticket-list"></div>
+    <div id="ticket-attachments"></div>
+  </section>
 
+</main>
 
-    <!-- Ticket Panel -->
-    <section class="ticket-panel">
-       <!-- Supervisor Create Ticket -->
-        <div id="create-ticket-panel" style="margin-bottom:16px;">
-        <h3>Create Ticket</h3>
-       <input type="text" id="new-issue-type" placeholder="Issue type"/>
-       <textarea id="new-description" placeholder="Ticket description"></textarea>
+<!-- ================= OVERLAYS ================= -->
 
-       <button id="create-ticket-btn">Create Ticket</button></div>
-                               
-        <h2>Raised Tickets</h2>
-        <div id="ticket-list"></div>
-        <div id="ticket-attachments"></div>
-    </section>
+<div id="ticket-modal-backdrop" class="modal-backdrop hidden"></div>
 
-    <div id="ticket-modal-backdrop" class="modal-backdrop hidden"></div>
-
-   <div id="ticket-modal" class="modal hidden">
+<div id="ticket-modal" class="modal hidden">
   <div class="modal-header">
     <h3>Ticket Details</h3>
     <button id="close-ticket-modal">✕</button>
   </div>
 
   <div class="modal-body">
-    <div id="ticket-modal-content">
-      <!-- injected by JS -->
-    </div>
+    <div id="ticket-modal-content"></div>
 
     <div class="modal-section">
       <h4>Attachments</h4>
@@ -103,21 +134,41 @@
       </div>
     </div>
   </div>
- <div id="queueDepth">0</div>
- <div id="waitingCalls">0</div>
- <div id="activeAgents">0</div>
- <div id="slaPercent">--%</div>
 
+  <!-- SLA / Queue Stats -->
+  <div id="queueDepth">0</div>
+  <div id="waitingCalls">0</div>
+  <div id="activeAgents">0</div>
+  <div id="slaPercent">--%</div>
 </div>
- <!-- Stress Test Sandbox (DEV ONLY) -->
- <div id="stress-test-layer" style="position: fixed; top: 0;right: 0; width: 260px;height: 100vh; 
- overflow-y: auto; background: rgba(0,0,0,0.25); 
- backdrop-filter: blur(8px); z-index: 9999; pointer-events: auto; 
- padding: 8px; display: none;">
- </div>
 
-</main>
+<div
+  id="stress-test-layer"
+  style="
+    position: fixed;
+    top: 0;
+    right: 0;
+    width: 260px;
+    height: 100vh;
+    overflow-y: auto;
+    background: rgba(0,0,0,0.25);
+    backdrop-filter: blur(8px);
+    z-index: 9999;
+    pointer-events: auto;
+    padding: 8px;
+    display: none;
+  ">
+</div>
 
+<!-- ================= FLOATING HEAP GRAPH ================= -->
+<div class="heap-widget">
+  <div class="heap-title">Heap Usage</div>
+  <canvas id="heapGraph" width="220" height="80"></canvas>
+</div>
+
+<!-- ================= SCRIPTS ================= -->
 <script type="module" src="./src/js/app.js"></script>
+<script type="module" src="./src/js/utils/memoryGraph.js"></script>
+
 </body>
 </html>
