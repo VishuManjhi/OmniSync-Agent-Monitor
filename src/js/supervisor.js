@@ -753,9 +753,13 @@ function renderAgents() {
 
   // Status Filter
   if (filter) {
+    const normalizedFilter = filter.toUpperCase().replace('-', '_');
     agents = agents.filter(
-      a => a.state === filter.toUpperCase()
+      a => a.state === normalizedFilter
     );
+  } else {
+    // If no filter (All Statuses), only show non-offline agents
+    agents = agents.filter(a => a.state !== 'OFFLINE');
   }
 
   // Search Filter (ID or Name)
@@ -1152,6 +1156,10 @@ async function seedAgentsIfEmpty(db) {
     store.put({ agentId: 'a4', name: 'Arjun' });
     store.put({ agentId: 'a5', name: 'Priya' });
     store.put({ agentId: 'a6', name: 'Rohan' });
+    store.put({ agentId: 'a7', name: 'Ananya' });
+    store.put({ agentId: 'a8', name: 'Kabir' });
+    store.put({ agentId: 'a9', name: 'Ishani' });
+    store.put({ agentId: 'a10', name: 'Reyansh' });
 
     console.log('[DB] Agent names seeded');
   };

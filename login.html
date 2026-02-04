@@ -90,6 +90,12 @@
                 const supervisor = USERS.find(u => u.id === id && u.pass === pass);
 
                 if (supervisor) {
+                    sessionStorage.setItem('restro_auth', JSON.stringify({
+                        id: supervisor.id,
+                        role: 'supervisor',
+                        name: supervisor.name,
+                        loginTime: Date.now()
+                    }));
                     window.location.href = './index.html';
                     return;
                 }
@@ -98,6 +104,11 @@
                 if (isAgentCandidate(id, pass)) {
                     // Let the actual ID pass through (e.g. a4, a6)
                     const agentId = id;
+                    sessionStorage.setItem('restro_auth', JSON.stringify({
+                        id: agentId,
+                        role: 'agent',
+                        loginTime: Date.now()
+                    }));
                     window.location.href = `./agent.html?agentId=${encodeURIComponent(agentId)}`;
                     return;
                 }

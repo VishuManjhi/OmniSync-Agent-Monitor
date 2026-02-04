@@ -8,6 +8,41 @@
     <!--<link rel="stylesheet" href="/styles/main.css">-->
     <link rel="stylesheet" href="/styles/agent.css">
     <link rel="icon" href="./favicon.ico.png" type="image/x-icon">
+
+    <script>
+        // 🛡️ AUTH GUARD - Agent Level
+        (function () {
+            function checkAuth() {
+                const authData = sessionStorage.getItem('restro_auth');
+                const params = new URLSearchParams(window.location.search);
+                const targetId = params.get('agentId');
+
+                if (!authData) {
+                    window.location.replace('./login.html');
+                    return;
+                }
+
+                const auth = JSON.parse(authData);
+
+                // If is agent, must match the ID in the URL
+                if (auth.role === 'agent') {
+                    if (!targetId || auth.id.toLowerCase() !== targetId.toLowerCase()) {
+                        window.location.replace('./login.html');
+                    }
+                }
+                // Supervisors can see any agent dashboard
+            }
+            checkAuth();
+            window.addEventListener('pageshow', (event) => {
+                if (event.persisted) checkAuth();
+            });
+        })();
+
+        function handleLogout() {
+            sessionStorage.removeItem('restro_auth');
+            window.location.replace('./login.html');
+        }
+    </script>
 </head>
 
 <body>
@@ -21,7 +56,7 @@
                 <span class="status-badge" id="status-badge">Offline</span>
             </div>
             <button class="action-btn" style="margin-left: 10px; padding: 6px 12px; font-size: 13px;"
-                onclick="window.location.href='/login.html'">Logout</button>
+                onclick="handleLogout()">Logout</button>
         </div>
     </header>
 

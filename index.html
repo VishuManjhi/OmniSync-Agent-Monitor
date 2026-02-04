@@ -8,6 +8,33 @@
   <link rel="icon" href="./favicon.ico.png" type="image/x-icon">
   <link rel="stylesheet" href="/styles/main.css">
 
+  <script>
+    // 🛡️ AUTH GUARD - Supervisor Level
+    (function () {
+      function checkAuth() {
+        const authData = sessionStorage.getItem('restro_auth');
+        if (!authData) {
+          window.location.replace('./login.html');
+          return;
+        }
+        const auth = JSON.parse(authData);
+        if (auth.role !== 'supervisor') {
+          window.location.replace('./login.html');
+        }
+      }
+      checkAuth();
+      // Also catch back/forward cache navigation
+      window.addEventListener('pageshow', (event) => {
+        if (event.persisted) checkAuth();
+      });
+    })();
+
+    function handleLogout() {
+      sessionStorage.removeItem('restro_auth');
+      window.location.replace('./login.html');
+    }
+  </script>
+
   <!-- Heap Widget CSS -->
   <style>
     .heap-widget {
@@ -80,11 +107,8 @@
 
       <button id="showAHTBtn" class="nav-btn">AHT</button>
       <button id="diag-btn" class="nav-btn">Diagnostics</button>
-      <button id="logout-btn" class="nav-btn" onclick="window.location.href='/login.html'">Logout</button>
+      <button class="nav-btn logout-btn" onclick="handleLogout()">Logout</button>
     </div>
-
-    <!-- AHT OVERLAY (Moved to bottom) -->
-
   </header>
 
 
