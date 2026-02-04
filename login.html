@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Restroboard Login</title>
+    <link rel="icon" href="./favicon.ico.png" type="image/x-icon">
+    <link rel="stylesheet" href="./styles/login.css">
+</head>
+
+<body>
+
+    <div class="login-container">
+        <div class="login-card">
+            <div class="brand">
+                <h1>Restroboard</h1>
+                <p>View your Agents at a glance</p>
+            </div>
+
+            <!-- Single Login Form -->
+            <div id="login-form" class="form-fade">
+                <div class="form-group">
+                    <label>User ID</label>
+                    <div class="input-wrapper">
+                        <input type="text" class="input-field" placeholder="Enter User ID" id="user-id">
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label>Password</label>
+                    <div class="input-wrapper">
+                        <input type="password" class="input-field" placeholder="Enter Password" id="password">
+                    </div>
+                </div>
+
+                <div id="login-error" class="hidden"
+                    style="color: #ef4444; font-size: 13px; margin-bottom: 12px; text-align: center;">
+                    Invalid credentials
+                </div>
+
+                <button class="login-btn" onclick="handleLogin()">
+                    Login
+                </button>
+            </div>
+
+        </div>
+    </div>
+
+    <script>
+        // Mock Database of Users
+        const USERS = [
+            { id: 'admin', pass: 'admin123', role: 'supervisor', name: 'Supervisor' },
+            { id: 'sup1', pass: 'pass1', role: 'supervisor', name: 'Ops Lead' }
+        ];
+        function isAgentCandidate(id, pass) {
+            const isMatch = (
+                /^[aA]\d+$/.test(id) || // Matches a1, a4, A6, etc.
+                id.toUpperCase().startsWith('A-') ||
+                id.toLowerCase().startsWith('agent')
+            );
+            return isMatch && pass === '1234';
+        }
+
+        function handleLogin() {
+            const idInput = document.getElementById('user-id');
+            const passInput = document.getElementById('password');
+            const errorMsg = document.getElementById('login-error');
+            const btn = document.querySelector('.login-btn');
+
+            const id = idInput.value.trim();
+            const pass = passInput.value.trim();
+
+            // Reset Error
+            errorMsg.classList.add('hidden');
+
+            if (!id || !pass) {
+                errorMsg.textContent = "Please enter both ID and Password";
+                errorMsg.classList.remove('hidden');
+                return;
+            }
+
+            // Loading state
+            btn.innerText = 'Authenticating...';
+            btn.style.opacity = '0.7';
+            btn.disabled = true;
+
+            setTimeout(() => {
+                // 1. Check Supervisors
+                const supervisor = USERS.find(u => u.id === id && u.pass === pass);
+
+                if (supervisor) {
+                    window.location.href = './index.html';
+                    return;
+                }
+
+                // 2. Check Agents
+                if (isAgentCandidate(id, pass)) {
+                    // Let the actual ID pass through (e.g. a4, a6)
+                    const agentId = id;
+                    window.location.href = `./agent.html?agentId=${encodeURIComponent(agentId)}`;
+                    return;
+                }
+
+                // 3. Failed
+                btn.innerText = 'Login';
+                btn.style.opacity = '1';
+                btn.disabled = false;
+                errorMsg.textContent = "Invalid ID or Password";
+                errorMsg.classList.remove('hidden');
+
+            }, 600); // Simulated network delay
+        }
+
+        // Enter key support
+        document.addEventListener('keypress', function (e) {
+            if (e.key === 'Enter') {
+                handleLogin();
+            }
+        });
+
+        // Auto-focus ID field
+        window.onload = function () {
+            document.getElementById('user-id').focus();
+        };
+    </script>
+</body>
+
+</html>

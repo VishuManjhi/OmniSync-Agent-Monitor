@@ -14,14 +14,14 @@ export function startLongPolling(onCommand) {
                 cache: 'no-store'
             });
 
-            // 🔑 Case 1: command delivered
+            //  Case 1: command delivered
             if (res.status === 200) {
                 const command = await res.json();
                 console.log('[LP] Command received:', command);
                 onCommand?.(command);
             }
 
-            // 🔑 Case 2: no command (idle poll)
+            //  Case 2: no command (idle poll)
             else if (res.status === 204) {
                 // normal long-poll timeout, do nothing
             }

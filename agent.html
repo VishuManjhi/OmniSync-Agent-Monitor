@@ -1,26 +1,31 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Agent Dashboard </title>
     <!--<link rel="stylesheet" href="/styles/main.css">-->
     <link rel="stylesheet" href="/styles/agent.css">
+    <link rel="icon" href="./favicon.ico.png" type="image/x-icon">
 </head>
+
 <body>
     <header class="header">
         <div class="header-left">
             <h1 class="logo">Agent Dashboard</h1>
-            <span class="agent-id" id="agent-id">Agent Id: <span id="current-agent-id">A-1</span></span>
-        </div> 
+            <span class="agent-id" id="agent-id">Agent Id: <span id="current-agent-id">...</span></span>
+        </div>
         <div class="header-right">
             <div class="current-status" id="current-status">
                 <span class="status-badge" id="status-badge">Offline</span>
             </div>
+            <button class="action-btn" style="margin-left: 10px; padding: 6px 12px; font-size: 13px;"
+                onclick="window.location.href='/login.html'">Logout</button>
         </div>
     </header>
-    
-    
+
+
     <main class="main-container">
         <!-- Clock In/Out Section -->
         <section class="card section-card">
@@ -54,13 +59,10 @@
             <h2 class="section-title">Raise Ticket</h2>
             <form id="ticket-form" class="ticket-form">
                 <label style="display:block; margin-top:12px;">
-                  Attach call recording / image:
-                    <input
-                 type="file"
-                  id="attachmentInput"
-                 accept="audio/*,image/*"/>
-            </label>
-              <div id="attachmentPreview" style="margin-top:10px;"></div>
+                    Attach call recording / image:
+                    <input type="file" id="attachmentInput" accept="audio/*,image/*" />
+                </label>
+                <div id="attachmentPreview" style="margin-top:10px;"></div>
                 <div class="form-group">
                     <label for="issue-type">Type of Issue *</label>
                     <select id="issue-type" name="issueType" required>
@@ -71,33 +73,35 @@
                         <option value="other">Other</option>
                     </select>
                 </div>
-                
+
                 <div class="form-group">
                     <label for="description">Description *</label>
-                    <textarea id="description" name="description" rows="4" required placeholder="Describe the issue"></textarea>
+                    <textarea id="description" name="description" rows="4" required
+                        placeholder="Describe the issue"></textarea>
                 </div>
-                
+
                 <div class="form-row">
                     <div class="form-group">
                         <label for="call-duration">Call Duration</label>
                         <input type="number" id="call-duration" name="callDuration" min="0" step="1" placeholder="0">
                     </div>
                 </div>
-                
+
                 <button type="submit" class="action-btn btn-primary">Submit Ticket</button>
             </form>
         </section>
         <section>
-         <h3>My Tickets</h3>
-         <div id="my-tickets"></div>
-         </section>
+            <h3>My Tickets</h3>
+            <div id="my-tickets"></div>
+        </section>
 
     </main>
     <script>
-      const params = new URLSearchParams(window.location.search);
-      window.AGENT_ID = params.get('agentId') || 'a1';
+        const params = new URLSearchParams(window.location.search);
+        window.AGENT_ID = params.get('agentId') || 'a1';
     </script>
 
     <script type="module" src="/src/js/agent.js"></script>
 </body>
+
 </html>

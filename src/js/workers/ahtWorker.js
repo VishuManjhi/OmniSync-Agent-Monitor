@@ -1,40 +1,46 @@
+console.log('[AHT Worker] loaded');
 self.onmessage = (e) => {
-    const tickets = e.data;
+  const tickets = e.data;
 
-    let totalHandleTime = 0;
-    let count = 0;
+  let totalTime = 0;
+  let count = 0;
 
-    const perAgent = new Map();
+  const perAgent = new Map();
 
-    for (const t of tickets) {
-        if (!t.callDuration || t.callDuration <= 0) continue;
+  for (const t of tickets) {
+    if (!t.issueDateTime) continue;
 
-        totalHandleTime += t.callDuration;
-        count++;
+    const start = new Date(t.issueDateTime).getTime();
+    const end = t.resolvedAt
+      ? new Date(t.resolvedAt).getTime()
+      : Date.now(); // ongoing ticket
 
-        if (!perAgent.has(t.agentId)) {
-            perAgent.set(t.agentId, {
-                total: 0,
-                count: 0
-            });
-        }
+    const duration = end - start;
+    if (duration <= 0) continue;
 
-        const agent = perAgent.get(t.agentId);
-        agent.total += t.callDuration;
-        agent.count++;
+    totalTime += duration;
+    count++;
+
+    if (!perAgent.has(t.agentId)) {
+      perAgent.set(t.agentId, { total: 0, count: 0 });
     }
 
-    const globalAHT = count === 0
-        ? 0
-        : Math.round(totalHandleTime / count);
+    const agent = perAgent.get(t.agentId);
+    agent.total += duration;
+    agent.count++;
+  }
 
-    const perAgentAHT = {};
-    perAgent.forEach((v, k) => {
-        perAgentAHT[k] = Math.round(v.total / v.count);
-    });
+  const globalAHT = count === 0
+    ? 0
+    : Math.round(totalTime / count / 1000); // seconds
 
-    self.postMessage({
-        globalAHT,
-        perAgentAHT
-    });
+  const perAgentAHT = {};
+  perAgent.forEach((v, k) => {
+    perAgentAHT[k] = Math.round(v.total / v.count / 1000);
+  });
+
+  self.postMessage({
+    globalAHT,
+    perAgentAHT
+  });
 };

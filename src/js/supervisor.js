@@ -14,82 +14,79 @@ import { queueAction } from './offlineQueue.js';
 
 
 function normalizeTicket(t) {
-    return {
-        ...t,
-        attachments: Array.isArray(t.attachments) ? t.attachments : [],
-        status: t.status || 'OPEN',
-        resolvedAt: t.resolvedAt || null,
-        issueDateTime: t.issueDateTime
-            ? new Date(t.issueDateTime).toISOString()
-            : null
-    };
+  return {
+    ...t,
+    attachments: Array.isArray(t.attachments) ? t.attachments : [],
+    status: t.status || 'OPEN',
+    resolvedAt: t.resolvedAt || null,
+    issueDateTime: t.issueDateTime
+      ? new Date(t.issueDateTime).toISOString()
+      : null
+  };
 }
 
 function normalizeSession(s) {
-    const clockInTime =
-        s.clockInTime ??
-        (s.clockIn ? new Date(s.clockIn).toISOString() : null);
+  const clockInTime =
+    s.clockInTime ??
+    (s.clockIn ? new Date(s.clockIn).toISOString() : null);
 
-    const clockOutTime =
-        s.clockOutTime ??
-        (s.clockOutTime ? new Date(s.clockOutTime).toISOString() : null);
+  const clockOutTime =
+    s.clockOutTime ??
+    (s.clockOutTime ? new Date(s.clockOutTime).toISOString() : null);
 
-    return {
-        ...s,
-        clockInTime,
-        clockOutTime,
-        breaks: Array.isArray(s.breaks) ? s.breaks : [],
-        onCall: s.onCall === true
-    };
+  return {
+    ...s,
+    clockInTime,
+    clockOutTime,
+    breaks: Array.isArray(s.breaks) ? s.breaks : [],
+    onCall: s.onCall === true
+  };
 }
 function deriveAgentState(session) {
-    if (!session) return 'OFFLINE';
-    if (session.clockOutTime) return 'OFFLINE';
+  if (!session) return 'OFFLINE';
+  if (session.clockOutTime) return 'OFFLINE';
 
-    const lastBreak = session.breaks.at(-1);
-    if (lastBreak && !lastBreak.breakOut) return 'ON_BREAK';
+  const lastBreak = session.breaks.at(-1);
+  if (lastBreak && !lastBreak.breakOut) return 'ON_BREAK';
 
-    if (session.onCall) return 'ON_CALL';
+  if (session.onCall) return 'ON_CALL';
 
-    return 'ACTIVE';
+  return 'ACTIVE';
 }
 function updateAgentStateMap(session) {
-    if (!session || !session.agentId) return;
+  if (!session || !session.agentId) return;
 
-    const status = deriveAgentState(session);
-    const now = Date.now();
+  const status = deriveAgentState(session);
+  const now = Date.now();
 
-    const prev = agentStateMap.get(session.agentId);
+  const prev = agentStateMap.get(session.agentId);
 
-    if (!prev || prev.status !== status) {
-        agentStateMap.set(session.agentId, {
-            status,
-            since: now
-        });
-    }
+  if (!prev || prev.status !== status) {
+    agentStateMap.set(session.agentId, {
+      status,
+      since: now
+    });
+  }
 
 }
 const queueMetrics = {
-    queueDepth: 0,
-    waitingCalls: 0,
-    activeAgents: 0,
-    slaPercent: 0
+  queueDepth: 0,
+  waitingCalls: 0,
+  activeAgents: 0,
+  slaPercent: 0
 };
-function renderQueueStats(stats) {
-    queueMetrics.queueDepth = stats.queueDepth;
-    queueMetrics.waitingCalls = stats.waitingCalls;
-    queueMetrics.activeAgents = stats.activeAgents;
-    queueMetrics.slaPercent = stats.slaPercent;
 
-    document.getElementById('queueDepth').textContent = queueMetrics.queueDepth;
-    document.getElementById('waitingCalls').textContent = queueMetrics.waitingCalls;
-    document.getElementById('activeAgents').textContent = queueMetrics.activeAgents;
-    document.getElementById('slaPercent').textContent = queueMetrics.slaPercent + '%';
-}
 
 
 window.__debug = { agentCardTimers, highlightedAgentCards }; //debug.agentCardTimers
 
+const ahtWorker = new Worker(
+  new URL('./workers/ahtWorker.js', import.meta.url),
+  { type: 'module' }
+);
+
+// debug
+window.__ahtWorker = ahtWorker;
 const agentStateMap = new Map();
 window.__agentStateMap = agentStateMap;
 const incidentSet = new Set();
@@ -100,398 +97,456 @@ let db = null;
 let allAgents = [];
 let activeHighlightedCard = null;
 let isWSRefresh = false;
-let ahtWorker = null;
 let selectedTicketId = null;
+let isAHTVisible = false;
 let agentNameMap = {};
+let cachedGlobalAHT = null;
+let cachedPerAgentAHT = null;
+let hasAHTData = false;
 
 
 export async function initialize(database) {
-    db = database;
+  db = database || await openDB();
 
-    const storedAgentId = sessionStorage.getItem('monitoredAgentId');
-    if (storedAgentId) {
-        selectedAgentId = storedAgentId;
-    }
-    if ("Notification" in window && Notification.permission === "default") {
-    Notification.requestPermission();
-    }
-    initWebSocket(handleWSMessage);
-
-    startSSE(handleProtocolStatus, async (stats) => {
+  const storedAgentId = sessionStorage.getItem('monitoredAgentId');
+  if (storedAgentId) {
+    selectedAgentId = storedAgentId;
+  }
+  startSSE(handleProtocolStatus, async (stats) => {
     const [waitingCalls, activeAgents, slaPercent] = await Promise.all([
-        calculateWaitingCalls(db),
-        calculateActiveAgents(db),
-        calculateSLAPercent(db)
+      calculateWaitingCalls(db),
+      calculateActiveAgents(db),
+      calculateSLAPercent(db)
     ]);
 
     renderQueueStats({
-        ...stats,                 // SIM
-        waitingCalls,             //r
-        activeAgents,             //r
-        slaPercent                //r
-     });
+      waitingCalls,
+      activeAgents,
+      slaPercent
+    });
+  });
+  document.getElementById('assign-agent-select')
+    ?.addEventListener('change', (e) => {
+      selectedAgentId = e.target.value || null;
+
+      document
+        .querySelectorAll('.agent-card.highlight')
+        .forEach(c => c.classList.remove('highlight'));
+
+      if (!selectedAgentId) return;
+
+      const card = document.querySelector(
+        `.agent-card[data-agent-id="${selectedAgentId}"]`
+      );
+
+      if (card) {
+        card.classList.add('highlight');
+        activeHighlightedCard = card;
+      }
     });
 
 
-    ahtWorker = new Worker(
-    new URL('./workers/ahtWorker.js', import.meta.url),
-    { type: 'module' }
-    );
+  if ("Notification" in window && Notification.permission === "default") {
+    Notification.requestPermission();
+  }
 
-    ahtWorker.onmessage = (e) => {
-    const { globalAHT, perAgentAHT } = e.data;
-    renderAHT(globalAHT, perAgentAHT);
-    };
-    loadSavedFilters();          
-    setupFilterHandlers();       
-    AgentGridDelegation(); 
-    await loadAgentNames(db);
-    refreshSupervisorPanel();
-    initWebSocket(handleWSMessage);
-    await seedAgentsIfEmpty(db);
+  loadSavedFilters();
+  setupFilterHandlers();
+  setupModalHandlers();
+  setupAHTHandlers();
+  AgentGridDelegation();
 
-   
-   //setInterval(refreshSupervisorPanel, 5000);
+  await loadAgentNames(db);
+  await seedAgentsIfEmpty(db);
+
+  refreshSupervisorPanel();
+  initWebSocket(handleWSMessage);
+
+
+  setInterval(refreshSupervisorPanel, 5000);
 }
+ahtWorker.onmessage = (e) => {
+  const { globalAHT, perAgentAHT } = e.data;
+
+  cachedGlobalAHT = globalAHT;
+  cachedPerAgentAHT = perAgentAHT;
+  hasAHTData = true;
+
+  console.log('[AHT cached]', { globalAHT, perAgentAHT });
+};
 
 function loadAgents() {
-    const tx = db.transaction(['agent_sessions'], 'readonly');
-    const store = tx.objectStore('agent_sessions');
+  const tx = db.transaction(['agent_sessions'], 'readonly');
+  const store = tx.objectStore('agent_sessions');
 
-    const sessions = [];
+  const sessions = [];
 
-    store.openCursor().onsuccess = (e) => {
-        const cursor = e.target.result;
-        if (cursor) {
-            const session = normalizeSession(cursor.value);
-                sessions.push(session);
+  store.openCursor().onsuccess = (e) => {
+    const cursor = e.target.result;
+    if (cursor) {
+      const session = normalizeSession(cursor.value);
+      sessions.push(session);
 
-            cursor.continue();
-        } else {
-            processSessions(sessions);
-        }
-    };
+      cursor.continue();
+    } else {
+      processSessions(sessions);
+    }
+  };
 }
+function formatSecondsToMinSec(seconds) {
+  if (seconds == null || isNaN(seconds)) return '—';
+
+  const mins = Math.floor(seconds / 60);
+  const secs = seconds % 60;
+
+  if (mins === 0) return `${secs}s`;
+  return `${mins}m ${secs}s`;
+}
+
 function processSessions(sessions) {
-    const map = new Map();
+  const map = new Map();
 
-    sessions.forEach(s => {
-        const prev = map.get(s.agentId);
+  sessions.forEach(s => {
+    const prev = map.get(s.agentId);
 
-        
-        if (!prev) {
-            map.set(s.agentId, s);
-            return;
-        }
-
-        
-        if (prev.sessionID && s.sessionID && prev.sessionID === s.sessionID) {
-            map.set(s.agentId, s);
-            return;
-        }
-
-        
-        if (prev.clockOutTime && !s.clockOutTime) {
-            map.set(s.agentId, s);
-            return;
-        }
-
-        
-        if (!prev.clockOutTime && !s.clockOutTime) {
-            const prevTime = new Date(prev.clockInTime || 0).getTime();
-            const currTime = new Date(s.clockInTime || 0).getTime();
-
-            if (currTime > prevTime) {
-                map.set(s.agentId, s);
-            }
-        }
-    });
-
-    allAgents = Array.from(map.values()).map(session => ({
-        agentId: session.agentId,
-        state: deriveAgentState(session),
-        clockInTime: session.clockInTime,
-        clockOutTime: session.clockOutTime,
-        session
-    }));
-    allAgents.forEach(agent => {
-            updateAgentStateMap(agent.session)
-        })
-
-    renderAgents();
-    if (selectedAgentId) renderAgentDetails(selectedAgentId);
-}
-function renderAgents() {
-    const filter = getAllFilters().status;
-    let agents = allAgents;
-
-    if (filter) {
-        agents = agents.filter(a => a.state === filter);
+    if (!prev) {
+      map.set(s.agentId, s);
+      return;
     }
 
-    const grid = document.getElementById('agent-grid');
-    if (!grid) return;
+    const prevIn = new Date(prev.clockInTime || 0).getTime();
+    const currIn = new Date(s.clockInTime || 0).getTime();
 
-    grid.innerHTML = '';
-
-    if (!agents.length) {
-        grid.innerHTML = '<p>No agents found.</p>';
-        return;
+    // newest clock-in always wins
+    if (currIn > prevIn) {
+      map.set(s.agentId, s);
     }
+  });
 
-    agents.forEach(agent => {
-        const card = createAgentCard(agent);
-        grid.appendChild(card);
-    });
-    if (selectedAgentId && !agents.some(a => a.agentId === selectedAgentId)) {
-    selectedAgentId = null;
-    document.getElementById('agent-info').innerHTML = '<em>Select an agent</em>';
-    document.getElementById('agent-tickets').innerHTML = '';
-     }
+  allAgents = Array.from(map.values()).map(session => ({
+    agentId: session.agentId,
+    state: deriveAgentState(session),
+    clockInTime: session.clockInTime,
+    clockOutTime: session.clockOutTime,
+    session
+  }));
 
+  allAgents.forEach(agent => {
+    updateAgentStateMap(agent.session);
+  });
+
+  renderAgents();
+  populateAssignableAgents();
+  if (selectedAgentId) renderAgentDetails(selectedAgentId);
 }
-
 function AgentGridDelegation() {
-    const grid = document.getElementById('agent-grid');
-    if (!grid) return;
+  const grid = document.getElementById('agent-grid');
+  if (!grid) return;
 
-    grid.addEventListener('click', (e) => {
+  grid.addEventListener('click', (e) => {
 
-        const logoutBtn = e.target.closest('.force-logout-btn');
-        if (logoutBtn) {
-            e.stopPropagation();
+    const logoutBtn = e.target.closest('.force-logout-btn');
+    if (logoutBtn) {
+      e.stopPropagation();
 
-            const agentId = logoutBtn.dataset.agentId;
-            initiateWhisper(agentId);   
-            return;
-        }
-        const card = e.target.closest('.agent-card');
-        if (!card || !grid.contains(card)) return;
+      const agentId = logoutBtn.dataset.agentId;
+      initiateWhisper(agentId);
+      return;
+    }
+    const card = e.target.closest('.agent-card');
+    if (!card || !grid.contains(card)) return;
 
-        handleAgentCardClick(card);
-    });
+    handleAgentCardClick(card);
+  });
 }
 
 function handleAgentCardClick(cardEl) {
-    const agentId = cardEl.dataset.agentId;
-    selectedAgentId = agentId;
+  const agentId = cardEl.dataset.agentId;
+  selectedAgentId = agentId;
+  const assignSelect = document.getElementById('assign-agent-select');
+  if (assignSelect) {
+    assignSelect.value = selectedAgentId;
+  }
 
-    sessionStorage.setItem('monitoredAgentId', agentId);
-    console.log('Clicked agent:', agentId);
+  sessionStorage.setItem('monitoredAgentId', agentId);
+  console.log('Clicked agent:', agentId);
 
-    if (activeHighlightedCard && activeHighlightedCard !== cardEl) {
-        activeHighlightedCard.classList.remove('highlight');
-    }
+  if (activeHighlightedCard && activeHighlightedCard !== cardEl) {
+    activeHighlightedCard.classList.remove('highlight');
+  }
 
-    cardEl.classList.add('highlight');
-    highlightedAgentCards.add(cardEl);
-    activeHighlightedCard = cardEl;
+  cardEl.classList.add('highlight');
+  highlightedAgentCards.add(cardEl);
+  activeHighlightedCard = cardEl;
 
-    renderAgentDetails(agentId);
+  renderAgentDetails(agentId);
 
-    const ticketContainer = document.getElementById('agent-tickets');
-    ticketContainer.innerHTML = '<em>Loading ticket</em>';
+  const ticketContainer = document.getElementById('agent-tickets');
+  ticketContainer.innerHTML = '<em>Loading ticket</em>';
 
-    loadTicketsForAgent(agentId);
+
+  loadTicketsForAgent(agentId);
+
+
 }
 
 function handleWSMessage(message) {
-    console.log('[WS MESSAGE]', message);
+  console.log('[WS MESSAGE]', message);
 
-    if (!message || !message.type) return;
+  if (!message || !message.type) return;
 
-    switch (message.type) {
-        case 'AGENT_STATUS_CHANGED': {
-            loadAgents();
+  switch (message.type) {
 
-            if (selectedAgentId) {
-                renderAgentDetails(selectedAgentId);
-            }
-            break;
-        }
-
-        case 'TICKET_CREATED':
-        case 'TICKET_UPDATED': {
-            loadTickets();
-
-            if (message.type === 'TICKET_CREATED') {
-
-                if (message.issueType) {
-                    incidentSet.add(message.issueType);
-                    console.log('[IncidentSet]', [...incidentSet]);
-                }
-
-                notifyNewTicket({
-                    agentId: message.agentId,
-                    issueType: message.issueType
-                });
-            }
-
-            if (selectedAgentId) {
-                loadTicketsForAgent(selectedAgentId);
-            }
-            break;
-        }
-
-        default:
-            break;
+    /* ============================
+       AGENT STATUS CHANGED
+    ============================ */
+    case 'AGENT_STATUS_CHANGED': {
+      console.log('[Supervisor] Agent status change detected, refreshing panel...');
+      refreshSupervisorPanel();
+      break;
     }
-}
-function loadTickets() {
-    const tx = db.transaction(['tickets'], 'readonly');
-    const store = tx.objectStore('tickets');
 
-    const tickets = [];
 
-    store.openCursor().onsuccess = (e) => {
-        const cursor = e.target.result;
-        if (cursor) {
-            tickets.push(normalizeTicket(cursor.value));
-            cursor.continue();
-        } else {
-            tickets.sort(
-                (a, b) => new Date(b.issueDateTime) - new Date(a.issueDateTime)
-            );
+    /* ============================
+       TICKETS
+    ============================ */
+    case 'TICKET_CREATED':
+    case 'TICKET_UPDATED': {
+      loadTickets();
 
-            console.log(
-                '[Supervisor] newest tickets:',
-                tickets.slice(0, 5).map(t => ({
-                    id: t.ticketId,
-                    agent: t.agentId,
-                    time: t.issueDateTime
-                }))
-            );
-            if(ahtWorker){
-                ahtWorker.postMessage(tickets);
-            }
-
-            renderTickets(tickets);
+      if (message.type === 'TICKET_CREATED') {
+        if (message.issueType) {
+          incidentSet.add(message.issueType);
+          console.log('[IncidentSet]', [...incidentSet]);
         }
-    };
+
+        notifyNewTicket({
+          agentId: message.agentId,
+          issueType: message.issueType
+        });
+      }
+
+      if (selectedAgentId) {
+        loadTicketsForAgent(selectedAgentId);
+      }
+
+      break;
+    }
+
+    default:
+      // ignore unknown WS messages
+      break;
+  }
+}
+
+function persistAgentStatus(agentId, status, sessionPatch = {}) {
+  if (!db) return;
+
+  const tx = db.transaction(['agent_sessions'], 'readwrite');
+  const store = tx.objectStore('agent_sessions');
+
+  store.openCursor().onsuccess = (e) => {
+    const cursor = e.target.result;
+    if (!cursor) return;
+
+    const session = cursor.value;
+    if (session.agentId !== agentId) {
+      cursor.continue();
+      return;
+    }
+
+    // Clock transitions
+    if (status === 'OFFLINE') {
+      session.clockOutTime = new Date().toISOString();
+    }
+
+    if (status === 'ACTIVE') {
+      session.clockOutTime = null;
+    }
+
+    //  Persist break / call state if provided
+    if ('breaks' in sessionPatch) {
+      session.breaks = sessionPatch.breaks;
+    }
+
+    if ('onCall' in sessionPatch) {
+      session.onCall = sessionPatch.onCall;
+    }
+
+    store.put(session);
+  };
+}
+
+function loadTickets() {
+  const tx = db.transaction(['tickets'], 'readonly');
+  const store = tx.objectStore('tickets');
+
+  const tickets = [];
+
+  store.openCursor().onsuccess = (e) => {
+    const cursor = e.target.result;
+    if (cursor) {
+      tickets.push(normalizeTicket(cursor.value));
+      cursor.continue();
+    } else {
+      tickets.sort(
+        (a, b) => new Date(b.issueDateTime) - new Date(a.issueDateTime)
+      );
+
+      console.log(
+        '[Supervisor] newest tickets:',
+        tickets.slice(0, 5).map(t => ({
+          id: t.ticketId,
+          agent: t.agentId,
+          time: t.issueDateTime
+        }))
+      );
+      renderTickets(tickets);
+      if (ahtWorker) {
+        ahtWorker.postMessage(tickets);
+      }
+    }
+  };
 }
 // Demo SLA threshold: 30 minutes
 const SLA_THRESHOLD_MS = 30 * 60 * 1000;
 
 async function calculateSLAPercent(db) {
-    const tx = db.transaction(['tickets'], 'readonly');
-    const store = tx.objectStore('tickets');
+  const tx = db.transaction(['tickets'], 'readonly');
+  const store = tx.objectStore('tickets');
 
-    let resolvedCount = 0;
-    let slaMetCount = 0;
+  let resolvedCount = 0;
+  let slaMetCount = 0;
 
-    return new Promise((resolve) => {
-        store.openCursor().onsuccess = (e) => {
-            const cursor = e.target.result;
+  return new Promise((resolve) => {
+    store.openCursor().onsuccess = (e) => {
+      const cursor = e.target.result;
 
-            if (!cursor) {
-                // no resolved tickets → 100% SLA for demo stability
-                if (resolvedCount === 0) {
-                    resolve(100);
-                } else {
-                    resolve(
-                        Math.round((slaMetCount / resolvedCount) * 100)
-                    );
-                }
-                return;
-            }
+      if (!cursor) {
+        // no resolved tickets → 100% SLA for demo stability
+        if (resolvedCount === 0) {
+          resolve(100);
+        } else {
+          resolve(
+            Math.round((slaMetCount / resolvedCount) * 100)
+          );
+        }
+        return;
+      }
 
-            const ticket = cursor.value;
+      const ticket = cursor.value;
 
-            // Only resolved tickets count for SLA
-            if (
-                ticket.status === 'RESOLVED' &&
-                ticket.issueDateTime &&
-                ticket.resolvedAt
-            ) {
-                resolvedCount++;
+      // Only resolved tickets count for SLA
+      if (
+        ticket.status === 'RESOLVED' &&
+        ticket.issueDateTime &&
+        ticket.resolvedAt
+      ) {
+        resolvedCount++;
 
-                const resolutionTime =
-                    ticket.resolvedAt - ticket.issueDateTime;
+        const resolutionTime =
+          ticket.resolvedAt - ticket.issueDateTime;
 
-                if (resolutionTime <= SLA_THRESHOLD_MS) {
-                    slaMetCount++;
-                }
-            }
+        if (resolutionTime <= SLA_THRESHOLD_MS) {
+          slaMetCount++;
+        }
+      }
 
-            cursor.continue();
-        };
-    });
+      cursor.continue();
+    };
+  });
 }
 async function calculateWaitingCalls(db) {
-    const tx = db.transaction(['tickets'], 'readonly');
-    const store = tx.objectStore('tickets');
+  const tx = db.transaction(['tickets'], 'readonly');
+  const store = tx.objectStore('tickets');
 
-    let count = 0;
+  let count = 0;
 
-    return new Promise((resolve) => {
-        store.openCursor().onsuccess = (e) => {
-            const cursor = e.target.result;
-            if (!cursor) return resolve(count);
+  return new Promise((resolve) => {
+    store.openCursor().onsuccess = (e) => {
+      const cursor = e.target.result;
+      if (!cursor) return resolve(count);
 
-            const ticket = cursor.value;
+      const ticket = cursor.value;
 
-            // tickets not yet resolved are "waiting"
-            if (ticket.status !== 'RESOLVED') {
-                count++;
-            }
+      // tickets not yet resolved are "waiting"
+      if (ticket.status !== 'RESOLVED') {
+        count++;
+      }
 
-            cursor.continue();
-        };
-    });
+      cursor.continue();
+    };
+  });
 }
 async function calculateActiveAgents(db) {
-    const tx = db.transaction(['agent_sessions'], 'readonly');
-    const store = tx.objectStore('agent_sessions');
+  const tx = db.transaction(['agent_sessions'], 'readonly');
+  const store = tx.objectStore('agent_sessions');
 
-    let active = new Set();
+  let active = new Set();
 
-    return new Promise((resolve) => {
-        store.openCursor().onsuccess = (e) => {
-            const cursor = e.target.result;
-            if (!cursor) return resolve(active.size);
+  return new Promise((resolve) => {
+    store.openCursor().onsuccess = (e) => {
+      const cursor = e.target.result;
+      if (!cursor) return resolve(active.size);
 
-            const session = cursor.value;
+      const session = cursor.value;
 
-            if (!session.clockOutTime) {
-                active.add(session.agentId);
-            }
+      if (!session.clockOutTime) {
+        active.add(session.agentId);
+      }
 
-            cursor.continue();
-        };
-    });
+      cursor.continue();
+    };
+  });
 }
 
-
-
-
-
 function createAgentCard(agent) {
-    const card = document.createElement('div');
-    card.className = 'agent-card';
-    card.dataset.agentId = agent.agentId;
+  const card = document.createElement('div');
+  card.className = 'agent-card';
+  card.dataset.agentId = agent.agentId;
+  card.dataset.status = agent.state ? agent.state.toLowerCase().replace('_', '-') : 'offline';
 
-    card.innerHTML = `
-        <strong>${agentNameMap[agent.agentId] ?? agent.agentId}</strong><br>
-        Status: ${formatStatus(agent.state)}<br>
-        Clock In: ${formatDateTime(agent.clockInTime)}<br>
-        Clock Out: ${formatDateTime(agent.clockOutTime)}<br>
+  const statusText = formatStatus(agent.state);
+  const name = agentNameMap[agent.agentId] ?? agent.agentId;
+
+  card.innerHTML = `
+        <div class="agent-card-header">
+            <span class="agent-id">${name}</span>
+            <div class="agent-status-dot"></div>
+        </div>
+
+        <div class="agent-info-row">
+            <span>Current Status</span>
+            <span class="agent-info-value" style="color:var(--accent-cyan)">${statusText}</span>
+        </div>
+        
+        <div class="agent-info-row">
+            <span>Clocked In</span>
+            <span class="agent-info-value">${formatDateTime(agent.clockInTime)}</span>
+        </div>
+
+        ${agent.clockOutTime ? `
+          <div class="agent-info-row">
+              <span>Clocked Out</span>
+              <span class="agent-info-value">${formatDateTime(agent.clockOutTime)}</span>
+          </div>
+        ` : ''}
+
         <button 
             class="force-logout-btn"
             data-agent-id="${agent.agentId}">
-            Force Logout
+            Terminate Session
         </button>
-
-        <span class="duration">--</span>
     `;
 
-    return card;
+  return card;
 }
 
 async function renderTicketModal(ticket) {
-    const content = document.getElementById('ticket-modal-content');
-    const attachmentsContainer = document.getElementById('ticket-modal-attachments');
+  const content = document.getElementById('ticket-modal-content');
+  const attachmentsContainer = document.getElementById('ticket-modal-attachments');
 
-    content.innerHTML = `
+  content.innerHTML = `
         <p><strong>Agent:</strong> ${ticket.agentId}</p>
         <p><strong>Issue:</strong> ${formatIssueType(ticket.issueType)}</p>
         <p><strong>Status:</strong> ${ticket.status}</p>
@@ -499,15 +554,15 @@ async function renderTicketModal(ticket) {
         <p><strong>Description:</strong></p>
         <p>${ticket.description || '—'}</p>
     `;
-    const attachments = await getAttachmentsForTicket(ticket.ticketId);
+  const attachments = await getAttachmentsForTicket(ticket.ticketId);
 
-    if (!attachments.length) {
-        attachmentsContainer.innerHTML = '<em>No attachments</em>';
-    } else {
-        attachmentsContainer.innerHTML = attachments.map(att => {
-            const url = URL.createObjectURL(att.blob);
+  if (!attachments.length) {
+    attachmentsContainer.innerHTML = '<em>No attachments</em>';
+  } else {
+    attachmentsContainer.innerHTML = attachments.map(att => {
+      const url = URL.createObjectURL(att.blob);
 
-            return `
+      return `
                 <div style="margin-bottom:6px">
                     📎 ${att.fileName} (${Math.round(att.size / 1024)}kb)
                     <a
@@ -520,10 +575,10 @@ async function renderTicketModal(ticket) {
                     </a>
                 </div>
             `;
-        }).join('');
-    }
+    }).join('');
+  }
 
-    openTicketModal();
+  openTicketModal();
 }
 
 function renderTickets(tickets) {
@@ -533,30 +588,50 @@ function renderTickets(tickets) {
   const latest = tickets.slice(0, 7);
 
   // ---------- RENDER ----------
-  panel.innerHTML = latest.map(t => `
+  panel.innerHTML = latest.map(t => {
+    const shortId = t.ticketId ? t.ticketId.substring(0, 4).toUpperCase() : '????';
+    return `
     <div
       class="ticket-card"
       data-ticket-id="${t.ticketId}"
-      style="cursor:pointer"
+      data-status="${t.status}"
     >
-      <strong>Agent:</strong> ${t.agentId ?? '—'}<br>
-      <strong>Issue:</strong> ${formatIssueType(t.issueType)}<br>
-      <strong>Status:</strong> ${t.status}<br>
-      <small>${formatDateTime(t.issueDateTime)}</small>
-      <p>${t.description || ''}</p>
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px;">
+        <span style="font-family:'Space Grotesk'; font-weight:800; color:var(--accent-cyan); font-size:15px;">#${shortId}</span>
+        <span class="ticket-status">${t.status}</span>
+      </div>
+      
+      <div style="font-size:13px; margin-bottom:6px; display:flex; justify-content:space-between;">
+        <span style="color:var(--text-muted);">Agent</span> 
+        <span style="color:var(--text-primary); font-weight:700;">${t.agentId ?? '—'}</span>
+      </div>
+      
+      <div style="font-size:13px; margin-bottom:12px; display:flex; justify-content:space-between;">
+        <span style="color:var(--text-muted);">Issue</span> 
+        <span style="color:var(--text-primary); font-weight:700;">${formatIssueType(t.issueType)}</span>
+      </div>
 
-      ${
-        t.status === 'RESOLUTION_REQUESTED'
-          ? `
-            <div class="supervisor-actions">
-              <button class="approve-btn">Approve</button>
-              <button class="reject-btn">Reject</button>
+      <p style="font-size:13px; color:var(--text-secondary); line-height:1.5; margin: 12px 0; padding:10px; background:rgba(0,0,0,0.2); border-radius:10px;">
+        ${t.description || 'No description provided.'}
+      </p>
+
+      <div style="font-size:11px; color:var(--text-dim); border-top: 1px solid rgba(255,255,255,0.05); padding-top:10px; margin-top:10px; display:flex; justify-content:space-between;">
+        <span>Raised at</span>
+        <span>${formatDateTime(t.issueDateTime)}</span>
+      </div>
+
+      ${t.status === 'RESOLUTION_REQUESTED'
+        ? `
+            <div class="supervisor-actions" style="margin-top:16px; display:flex; gap:10px;">
+              <button class="approve-btn" style="flex:1;">Approve</button>
+              <button class="reject-btn" style="flex:1;">Reject</button>
             </div>
           `
-          : ''
+        : ''
       }
     </div>
-  `).join('');
+  `;
+  }).join('');
 
   // ---------- EVENTS (DELEGATION) ----------
   panel.onclick = async (e) => {
@@ -577,13 +652,31 @@ function renderTickets(tickets) {
 
       console.warn('[SUPERVISOR] Approving ticket', ticketId);
 
+      //  Supervisor DB is source of truth
+      const tx = db.transaction(['tickets'], 'readwrite');
+      const store = tx.objectStore('tickets');
+
+      store.get(ticketId).onsuccess = (ev) => {
+        const t = ev.target.result;
+        if (!t) return;
+
+        if (t.status !== 'RESOLUTION_REQUESTED') return;
+
+        t.status = 'RESOLVED';
+        t.resolvedAt = Date.now();
+
+        store.put(t).onsuccess = () => {
+          loadTickets(); // UI updates immediately
+        };
+      };
+
+      // notify agent
       sendMessage({
         type: 'RESOLUTION_APPROVED',
         ticketId,
         agentId: ticket.agentId
       });
 
-      loadTickets(); // refresh from DB
       return;
     }
 
@@ -592,14 +685,37 @@ function renderTickets(tickets) {
       e.preventDefault();
       e.stopPropagation();
 
+      const reason = prompt(
+        'Reason for rejection (will be sent to agent):'
+      );
+      if (!reason) return;
+
       console.warn('[SUPERVISOR] Rejecting ticket', ticketId);
 
-      updateTicket(ticketId, (t) => {
-        if (t.status !== 'RESOLUTION_REQUESTED') return;
+      const tx = db.transaction(['tickets'], 'readwrite');
+      const store = tx.objectStore('tickets');
+
+      store.get(ticketId).onsuccess = (ev) => {
+        const t = ev.target.result;
+        if (!t) return;
+
         t.status = 'IN_PROGRESS';
+        t.rejectionReason = reason;
+        t.rejectedAt = Date.now();
+
+        store.put(t).onsuccess = () => {
+          loadTickets(); // buttons disappear immediately
+        };
+      };
+
+      // notify agent
+      sendMessage({
+        type: 'RESOLUTION_REJECTED',
+        ticketId,
+        agentId: ticket.agentId,
+        reason
       });
 
-      loadTickets();
       return;
     }
 
@@ -609,32 +725,101 @@ function renderTickets(tickets) {
   };
 }
 
+function populateAssignableAgents() {
+  const select = document.getElementById('assign-agent-select');
+  if (!select) return;
+
+  select.innerHTML = '<option value="">Unassigned</option>';
+
+  const activeAgents = allAgents.filter(a => a.state === 'ACTIVE');
+
+  activeAgents.forEach(agent => {
+    const opt = document.createElement('option');
+    opt.value = agent.agentId;
+    opt.textContent = agentNameMap[agent.agentId] ?? agent.agentId;
+
+    if (agent.agentId === selectedAgentId) {
+      opt.selected = true;
+    }
+
+    select.appendChild(opt);
+  });
+}
+function renderAgents() {
+  const filter = getAllFilters().status;
+  const searchTerm = document.getElementById('agent-search')?.value.toLowerCase() || '';
+
+  let agents = allAgents;
+
+  // Status Filter
+  if (filter) {
+    agents = agents.filter(
+      a => a.state === filter.toUpperCase()
+    );
+  }
+
+  // Search Filter (ID or Name)
+  if (searchTerm) {
+    agents = agents.filter(a => {
+      const name = (agentNameMap[a.agentId] ?? '').toLowerCase();
+      const id = (a.agentId ?? '').toLowerCase();
+      return name.includes(searchTerm) || id.includes(searchTerm);
+    });
+  }
+
+  const grid = document.getElementById('agent-grid');
+  if (!grid) return;
+
+  grid.innerHTML = '';
+
+  if (!agents.length) {
+    grid.innerHTML = '<p>No agents found.</p>';
+    return;
+  }
+
+  agents.forEach(agent => {
+    const card = createAgentCard(agent);
+    grid.appendChild(card);
+  });
+
+  // If selected agent disappeared due to filter
+  if (
+    selectedAgentId &&
+    !agents.some(a => a.agentId === selectedAgentId)
+  ) {
+    selectedAgentId = null;
+    document.getElementById('agent-info').innerHTML =
+      '<em>Select an agent</em>';
+    document.getElementById('agent-tickets').innerHTML = '';
+  }
+}
+
+
 function renderAgentDetails(agentId) {
-    const agent = allAgents.find(a => a.agentId === agentId);
-    if (!agent) return;
+  const agent = allAgents.find(a => a.agentId === agentId);
+  if (!agent) return;
 
-    const container = document.getElementById('agent-info');
-    const breaks = agent.session?.breaks || [];
+  const container = document.getElementById('agent-info');
+  const breaks = agent.session?.breaks || [];
 
-    container.innerHTML = `
+  container.innerHTML = `
         <strong>Agent ID:</strong> ${agent.agentId}<br>
         <strong>Agent:</strong> ${agentNameMap[agent.agentId] ?? agent.agentId}<br>
         <strong>Status:</strong> ${formatStatus(agent.state)}<br>
         <strong>Clock In:</strong> ${formatDateTime(agent.clockInTime)}<br>
         <strong>Clock Out:</strong> ${formatDateTime(agent.clockOutTime)}<br>
         <strong>Breaks:</strong>
-        ${
-            breaks.length === 0
-                ? '<div><em>No breaks taken</em></div>'
-                : breaks.map(b => {
-                    const start = new Date(b.breakIn).getTime();
-                    const end = b.breakOut
-                        ? new Date(b.breakOut).getTime()
-                        : Date.now();
+        ${breaks.length === 0
+      ? '<div><em>No breaks taken</em></div>'
+      : breaks.map(b => {
+        const start = new Date(b.breakIn).getTime();
+        const end = b.breakOut
+          ? new Date(b.breakOut).getTime()
+          : Date.now();
 
-                    const duration = formatDuration(end - start);
+        const duration = formatDuration(end - start);
 
-                    return `
+        return `
                         <div style="font-size:13px; margin-top:4px">
                             • ${formatDateTime(b.breakIn)}
                             →
@@ -642,222 +827,247 @@ function renderAgentDetails(agentId) {
                             <span style="opacity:0.7"> (${duration})</span>
                         </div>
                     `;
-                }).join('')
-        }
+      }).join('')
+    }
     `;
 }
 
 
 
 function loadTicketsForAgent(agentId) {
-    const tx = db.transaction(['tickets'], 'readonly');
-    const store = tx.objectStore('tickets');
+  const tx = db.transaction(['tickets'], 'readonly');
+  const store = tx.objectStore('tickets');
 
-    const tickets = [];
+  const tickets = [];
 
-    store.openCursor().onsuccess = (e) => {
-        const cursor = e.target.result;
+  store.openCursor().onsuccess = (e) => {
+    const cursor = e.target.result;
 
-        if (cursor) {
-            const ticket = normalizeTicket(cursor.value);
+    if (cursor) {
+      const ticket = normalizeTicket(cursor.value);
 
-            if (ticket.agentId === agentId) {
-                tickets.push(ticket);
-            }
+      if (ticket.agentId === agentId) {
+        tickets.push(ticket);
+      }
 
-            cursor.continue();
-        } else {
-            tickets.sort(
-                (a, b) => new Date(b.issueDateTime) - new Date(a.issueDateTime)
-            );
+      cursor.continue();
+    } else {
+      tickets.sort(
+        (a, b) => new Date(b.issueDateTime) - new Date(a.issueDateTime)
+      );
 
-            renderTicketsInAgentDetails(tickets);
-        }
-    };
+      renderTicketsInAgentDetails(tickets);
+    }
+  };
 }
 
 function renderAHT(globalAHT, perAgentAHT) {
-    const el = document.getElementById('aht-value');
-    if (el) el.textContent = `${globalAHT}s`;
+  const el = document.getElementById('aht-value');
+  if (el) el.textContent = `${globalAHT}s`;
 
-    console.log('[AHT]', {
-        globalAHT,
-        perAgentAHT
-    });
+  console.log('[AHT]', {
+    globalAHT,
+    perAgentAHT
+  });
 }
 function renderAttachments(attachments) {
-    const container = document.getElementById('ticket-attachments');
-    if (!container) return;
+  const container = document.getElementById('ticket-attachments');
+  if (!container) return;
 
-    container.innerHTML = '';
+  container.innerHTML = '';
 
-    if (!attachments.length) {
-        container.innerHTML = '<p>No attachments.</p>';
-        return;
-    }
+  if (!attachments.length) {
+    container.innerHTML = '<p>No attachments.</p>';
+    return;
+  }
 
-    attachments.forEach(att => {
-        const row = document.createElement('div');
-        row.style.display = 'flex';
-        row.style.justifyContent = 'space-between';
-        row.style.alignItems = 'center';
-        row.style.marginBottom = '8px';
-        row.style.padding = '6px 0';
+  attachments.forEach(att => {
+    const row = document.createElement('div');
+    row.style.display = 'flex';
+    row.style.justifyContent = 'space-between';
+    row.style.alignItems = 'center';
+    row.style.marginBottom = '8px';
+    row.style.padding = '6px 0';
 
-        const name = document.createElement('span');
-        name.textContent = att.fileName;
-        name.style.fontSize = '14px';
+    const name = document.createElement('span');
+    name.textContent = att.fileName;
+    name.style.fontSize = '14px';
 
-        const download = document.createElement('a');
-        download.href = URL.createObjectURL(att.blob);
-        download.download = att.fileName;
-        download.textContent = '⬇ Download';
-        download.style.color = '#6aa9ff';
-        download.style.cursor = 'pointer';
+    const download = document.createElement('a');
+    download.href = URL.createObjectURL(att.blob);
+    download.download = att.fileName;
+    download.textContent = '⬇ Download';
+    download.style.color = '#6aa9ff';
+    download.style.cursor = 'pointer';
 
-        row.appendChild(name);
-        row.appendChild(download);
+    row.appendChild(name);
+    row.appendChild(download);
 
-        container.appendChild(row);
-    });
+    container.appendChild(row);
+  });
 }
 
 function renderTicketsInCard(tickets, cardEl) {
-    const container = cardEl.querySelector('.agent-tickets');
-    if (!container) return;
+  const container = cardEl.querySelector('.agent-tickets');
+  if (!container) return;
 
-    const latestFive = tickets
-        .sort((a, b) => Number(b.issueDateTime) - Number(a.issueDateTime))
-        .slice(0, 5);
+  const latestFive = tickets
+    .sort((a, b) => Number(b.issueDateTime) - Number(a.issueDateTime))
+    .slice(0, 5);
 
-    container.innerHTML = latestFive.length
-        ? latestFive.map(t => `
+  container.innerHTML = latestFive.length
+    ? latestFive.map(t => `
             <div class="ticket-mini">
                 <strong>${formatIssueType(t.issueType)}</strong>
                 (${t.status})
             </div>
         `).join('')
-        : '<em>No recent tickets</em>';
+    : '<em>No recent tickets</em>';
 }
 
 function renderTicketsInAgentDetails(tickets) {
-    const container = document.getElementById('agent-tickets');
-    if (!container) return;
+  const container = document.getElementById('agent-tickets');
+  if (!container) return;
 
-    if (!tickets.length) {
-        container.innerHTML = '<em>No tickets</em>';
-        return;
-    }
+  if (!tickets.length) {
+    container.innerHTML = '<em>No tickets</em>';
+    return;
+  }
 
-    container.innerHTML = tickets
-        .slice(0, 5)
-        .map(t => `
+  container.innerHTML = tickets
+    .slice(0, 5)
+    .map(t => {
+      const shortId = t.ticketId ? t.ticketId.substring(0, 4).toUpperCase() : '????';
+      return `
             <div class="ticket-item" data-ticket-id="${t.ticketId}">
-                <strong>${formatIssueType(t.issueType)}</strong>
+                <div style="display:flex; justify-content:space-between;">
+                  <strong>${formatIssueType(t.issueType)}</strong>
+                  <span style="font-size:11px; font-weight:700; color:var(--purple);">#${shortId}</span>
+                </div>
                 <span>(${t.status})</span><br>
                 <small>${formatDateTime(t.issueDateTime)}</small>
             </div>
-        `)
-        .join('');
+        `;
+    })
+    .join('');
 
-    container.querySelectorAll('.ticket-item').forEach(ticketEl => {
-        ticketEl.addEventListener('click', () => {
-            const ticketId = ticketEl.dataset.ticketId;
-            openTicketModal(ticketId);
-        });
+  container.querySelectorAll('.ticket-item').forEach(ticketEl => {
+    ticketEl.addEventListener('click', () => {
+      const ticketId = ticketEl.dataset.ticketId;
+      openTicketModal(ticketId);
     });
+  });
 }
 //new Notification("Test Notification", { body: "Noti works" })
 
 function notifyNewTicket({ agentId, issueType }) {
-    console.log(' notifyNewTicket called', agentId, issueType);
-    if (!("Notification" in window)) return;
+  console.log(' notifyNewTicket called', agentId, issueType);
+  if (!("Notification" in window)) return;
 
-    if (Notification.permission === "granted") {
-        new Notification("New Ticket Raised", {
-            body: `Agent ${agentId} • ${issueType || 'Issue'}`,
-        });
-    }
+  if (Notification.permission === "granted") {
+    new Notification("New Ticket Raised", {
+      body: `Agent ${agentId} • ${issueType || 'Issue'}`,
+    });
+  }
 }
 async function getAttachmentsForTicket(ticketId) {
-    const db = await openDB();
-    return new Promise((resolve) => {
-        const tx = db.transaction(['attachments'], 'readonly');
-        const store = tx.objectStore('attachments');
-        const index = store.index('ticketId');
+  const db = await openDB();
+  return new Promise((resolve) => {
+    const tx = db.transaction(['attachments'], 'readonly');
+    const store = tx.objectStore('attachments');
+    const index = store.index('ticketId');
 
-        const attachments = [];
+    const attachments = [];
 
-        index.openCursor(IDBKeyRange.only(ticketId)).onsuccess = (e) => {
-            const cursor = e.target.result;
-            if (cursor) {
-                attachments.push(cursor.value);
-                cursor.continue();
-            } else {
-                resolve(attachments);
-            }
-        };
-    });
+    index.openCursor(IDBKeyRange.only(ticketId)).onsuccess = (e) => {
+      const cursor = e.target.result;
+      if (cursor) {
+        attachments.push(cursor.value);
+        cursor.continue();
+      } else {
+        resolve(attachments);
+      }
+    };
+  });
 }
 function setupFilterHandlers() {
-    const filter = document.getElementById('status-filter');
-    const clearBtn = document.getElementById('clear-filters-btn');
+  const filter = document.getElementById('status-filter');
+  const searchInput = document.getElementById('agent-search');
+  const clearBtn = document.getElementById('clear-filters-btn');
 
-    filter?.addEventListener('change', e => {
-        saveFilter(STORAGE_KEYS.FILTER_STATUS, e.target.value);
-        renderAgents();
-    });
+  filter?.addEventListener('change', e => {
+    saveFilter(STORAGE_KEYS.FILTER_STATUS, e.target.value);
+    renderAgents();
+  });
 
-    clearBtn?.addEventListener('click', () => {
-        clearAllFilters();
-        filter.value = '';
-        renderAgents();
-    });
+  searchInput?.addEventListener('input', () => {
+    renderAgents();
+  });
+
+  clearBtn?.addEventListener('click', () => {
+    clearAllFilters();
+    if (filter) filter.value = '';
+    if (searchInput) searchInput.value = '';
+    renderAgents();
+  });
 }
 function loadSavedFilters() {
-    const filter = getAllFilters().status;
-    const select = document.getElementById('status-filter');
-    if (select && filter) select.value = filter;
+  const filter = getAllFilters().status;
+  const select = document.getElementById('status-filter');
+  if (select && filter) select.value = filter;
 }
 
 function refreshSupervisorPanel() {
-    allAgents = [];
-    loadAgents();
-    loadTickets();
+  loadAgents();
+  loadTickets();
+}
+
+function renderQueueStats({ waitingCalls, activeAgents, slaPercent }) {
+  const slaEl = document.getElementById('header-sla');
+  const waitingEl = document.getElementById('header-waiting');
+  const staffEl = document.getElementById('header-staff');
+
+  if (slaEl) slaEl.textContent = `${slaPercent}%`;
+  if (waitingEl) waitingEl.textContent = waitingCalls;
+  if (staffEl) staffEl.textContent = activeAgents;
+
+  // Also update legacy elements if they exist
+  const oldSla = document.getElementById('slaPercent');
+  if (oldSla) oldSla.textContent = `${slaPercent}%`;
 }
 function formatStatus(type) {
-    if(!type) return;
-    return type.replace('-', ' ').toUpperCase();
+  if (!type) return;
+  return type.replace('-', ' ').toUpperCase();
 }
 function formatIssueType(issueType) {
-    if (!issueType) return '';
-    return issueType.replace('-', ' ').toUpperCase();
+  if (!issueType) return '';
+  return issueType.replace('-', ' ').toUpperCase();
 }
 function formatDateTime(ts) {
-    if (!ts) return '—';
-    return new Date(ts).toLocaleString();
+  if (!ts) return '—';
+  return new Date(ts).toLocaleString();
 }
 function openTicketModal() {
-    document.getElementById('ticket-modal').classList.remove('hidden');
-    document.getElementById('ticket-modal-backdrop').classList.remove('hidden');
+  document.getElementById('ticket-modal').classList.remove('hidden');
+  document.getElementById('ticket-modal-backdrop').classList.remove('hidden');
 }
 
 function closeTicketModal() {
-    document.getElementById('ticket-modal').classList.add('hidden');
-    document.getElementById('ticket-modal-backdrop').classList.add('hidden');
+  document.getElementById('ticket-modal').classList.add('hidden');
+  document.getElementById('ticket-modal-backdrop').classList.add('hidden');
 }
 function formatDuration(ms) {
-    if (!ms || ms < 0) return '0s';
+  if (!ms || ms < 0) return '0s';
 
-    const totalSeconds = Math.floor(ms / 1000);
-    const minutes = Math.floor(totalSeconds / 60);
-    const seconds = totalSeconds % 60;
+  const totalSeconds = Math.floor(ms / 1000);
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
 
-    if (minutes === 0) return `${seconds}s`;
-    return `${minutes}m ${seconds}s`;
+  if (minutes === 0) return `${seconds}s`;
+  return `${minutes}m ${seconds}s`;
 }
 function handleProtocolStatus(protocol, status) {
-    updateProtocolLED(protocol, status === 'connected');
+  updateProtocolLED(protocol, status === 'connected');
 }
 
 function startWhisperForAgent(agentId) {
@@ -867,27 +1077,31 @@ function startWhisperForAgent(agentId) {
   );
 }
 async function initiateWhisper(agentId) {
-  console.log('[Supervisor] Initiating whisper for:', agentId);
+  console.log('[Supervisor] Initiating FORCE_LOGOUT for:', agentId);
 
   const command = {
     type: 'FORCE_LOGOUT',
     agentId
   };
 
+  //  Try realtime WS first
   try {
-    // Online, best-effort whisper
+    sendMessage(command);
+    console.log('[Supervisor] FORCE_LOGOUT sent via WS');
+    return;
+  } catch (err) {
+    console.warn('[Supervisor] WS failed, falling back to whisper');
+  }
+
+  // Fallback to whisper / offline queue
+  try {
     await fetch('http://localhost:3002/lp/whisper', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(command)
     });
-
   } catch (err) {
-    console.warn(
-      '[Supervisor] Offline / request failed, queuing FORCE_LOGOUT'
-    );
-
-    // queue FULL command
+    console.warn('[Supervisor] Whisper failed, queuing');
     await queueAction(command);
   }
 }
@@ -895,89 +1109,189 @@ async function initiateWhisper(agentId) {
 
 
 
+
 function runEventLoopDiagnostic() {
-    console.clear();
-    console.log('%c[DIAG] Sync start', 'color: cyan');
+  console.clear();
+  console.log('%c[DIAG] Sync start', 'color: cyan');
 
-    // Microtask 1
-    Promise.resolve().then(() => {
-        console.log('%c[DIAG] Microtask: Promise.then', 'color: lime');
-    });
+  // Microtask 1
+  Promise.resolve().then(() => {
+    console.log('%c[DIAG] Microtask: Promise.then', 'color: lime');
+  });
 
-    // Microtask 2
-    queueMicrotask(() => {
-        console.log('%c[DIAG] Microtask: queueMicrotask', 'color: lime');
-    });
+  // Microtask 2
+  queueMicrotask(() => {
+    console.log('%c[DIAG] Microtask: queueMicrotask', 'color: lime');
+  });
 
-    // Macrotask 1
-    setTimeout(() => {
-        console.log('%c[DIAG] Macrotask: setTimeout', 'color: orange');
-    }, 0);
+  // Macrotask 1
+  setTimeout(() => {
+    console.log('%c[DIAG] Macrotask: setTimeout', 'color: orange');
+  }, 0);
 
-    // Macrotask 2 
-    const channel = new MessageChannel();
-    channel.port1.onmessage = () => {
-        console.log('%c[DIAG] Macrotask: MessageChannel', 'color: orange');
-    };
-    channel.port2.postMessage(null);
+  // Macrotask 2 
+  const channel = new MessageChannel();
+  channel.port1.onmessage = () => {
+    console.log('%c[DIAG] Macrotask: MessageChannel', 'color: orange');
+  };
+  channel.port2.postMessage(null);
 
-    console.log('%c[DIAG] Sync end', 'color: cyan');
+  console.log('%c[DIAG] Sync end', 'color: cyan');
 }
 async function seedAgentsIfEmpty(db) {
-    const tx = db.transaction(['agents'], 'readwrite');
-    const store = tx.objectStore('agents');
+  const tx = db.transaction(['agents'], 'readwrite');
+  const store = tx.objectStore('agents');
 
-    const countReq = store.count();
-    countReq.onsuccess = () => {
-        if (countReq.result > 0) return;
+  const countReq = store.count();
+  countReq.onsuccess = () => {
+    if (countReq.result > 0) return;
 
-        store.put({ agentId: 'a1', name: 'Vishu' });
-        store.put({ agentId: 'a2', name: 'Rishika' });
-        store.put({ agentId: 'a3', name: 'Nirma' });
+    store.put({ agentId: 'a1', name: 'Vishu' });
+    store.put({ agentId: 'a2', name: 'Rishika' });
+    store.put({ agentId: 'a3', name: 'Nirma' });
+    store.put({ agentId: 'a4', name: 'Arjun' });
+    store.put({ agentId: 'a5', name: 'Priya' });
+    store.put({ agentId: 'a6', name: 'Rohan' });
 
-        console.log('[DB] Agent names seeded');
-    };
+    console.log('[DB] Agent names seeded');
+  };
 }
 async function loadAgentNames(db) {
-    return new Promise((resolve) => {
-        const tx = db.transaction(['agents'], 'readonly');
-        const store = tx.objectStore('agents');
+  return new Promise((resolve) => {
+    const tx = db.transaction(['agents'], 'readonly');
+    const store = tx.objectStore('agents');
 
-        const map = {};
+    const map = {};
 
-        store.openCursor().onsuccess = (e) => {
-            const cursor = e.target.result;
-            if (!cursor) {
-                agentNameMap = map;
-                console.log('[Supervisor] Agent names loaded', agentNameMap);
-                resolve();
-                return;
-            }
+    store.openCursor().onsuccess = (e) => {
+      const cursor = e.target.result;
+      if (!cursor) {
+        agentNameMap = map;
+        console.log('[Supervisor] Agent names loaded', agentNameMap);
+        resolve();
+        return;
+      }
 
-            map[cursor.key] = cursor.value.name;
-            cursor.continue();
-        };
-    });
+      map[cursor.key] = cursor.value.name;
+      cursor.continue();
+    };
+  });
 }
 
 
 
 
 
-document.getElementById('close-ticket-modal')
-    ?.addEventListener('click', closeTicketModal);
+function setupModalHandlers() {
+  const closeBtn = document.getElementById('close-ticket-modal');
+  const backdrop = document.getElementById('ticket-modal-backdrop');
 
-document.getElementById('ticket-modal-backdrop')
-    ?.addEventListener('click', closeTicketModal);
+  if (closeBtn) {
+    closeBtn.addEventListener('click', closeTicketModal);
+    // Explicitly log to debug
+    console.log('[Supervisor] Modal close button listener attached');
+  } else {
+    console.error('[Supervisor] Close button NOT found');
+  }
+
+  if (backdrop) {
+    backdrop.addEventListener('click', closeTicketModal);
+  }
+
+  // Also handle Escape key
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+      const modal = document.getElementById('ticket-modal');
+      if (modal && !modal.classList.contains('hidden')) {
+        closeTicketModal();
+      }
+    }
+  });
+}
 document.getElementById('diag-btn')
   ?.addEventListener('click', runEventLoopDiagnostic);
+
+function setupAHTHandlers() {
+  const showBtn = document.getElementById('showAHTBtn');
+  const ahtOverlay = document.getElementById('ahtOverlay');
+  const closeBtn = document.getElementById('closeAHTBtn');
+
+  if (!showBtn || !ahtOverlay) return;
+
+  function openAHT() {
+    if (!hasAHTData) {
+      alert('AHT not ready yet');
+      return;
+    }
+
+    document.getElementById('globalAHT').textContent =
+      formatSecondsToMinSec(cachedGlobalAHT);
+
+    const container = document.getElementById('perAgentAHT');
+    container.innerHTML = '';
+
+    for (const agentId in cachedPerAgentAHT) {
+      const label =
+        agentId === 'null'
+          ? 'Unassigned'
+          : agentNameMap[agentId] ?? agentId;
+
+      const row = document.createElement('div');
+      row.textContent =
+        `${label}: ${formatSecondsToMinSec(cachedPerAgentAHT[agentId])}`;
+      container.appendChild(row);
+    }
+
+    ahtOverlay.classList.remove('hidden');
+    isAHTVisible = true;
+  }
+
+  function closeAHT() {
+    ahtOverlay.classList.add('hidden');
+    isAHTVisible = false;
+  }
+
+  showBtn.addEventListener('click', openAHT);
+  closeBtn?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    closeAHT();
+  });
+
+  const secondaryCloseBtn = document.getElementById('closeAHTBtnSecondary');
+  secondaryCloseBtn?.addEventListener('click', closeAHT);
+
+  // Close by clicking backdrop
+  ahtOverlay.addEventListener('click', (e) => {
+    if (e.target === ahtOverlay) {
+      closeAHT();
+    }
+  });
+
+  // Close via ESC key
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && isAHTVisible) {
+      closeAHT();
+    }
+  });
+}
 document.getElementById('create-ticket-btn')
   ?.addEventListener('click', () => {
-    const issueType = document.getElementById('new-issue-type').value.trim();
-    const description = document.getElementById('new-description').value.trim();
+
+    const issueType =
+      document.getElementById('new-issue-type').value.trim();
+    const description =
+      document.getElementById('new-description').value.trim();
+
+    const agentId =
+      document.getElementById('assign-agent-select')?.value || null;
 
     if (!issueType) {
       alert('Issue type required');
+      return;
+    }
+
+    if (!agentId) {
+      alert('Please select an agent to assign the ticket to.');
       return;
     }
 
@@ -985,9 +1299,9 @@ document.getElementById('create-ticket-btn')
       ticketId: crypto.randomUUID(),
       issueType,
       description,
-      status: 'UNASSIGNED',
-      agentId: null,
-      assignedAgentId: null,
+      status: agentId ? 'ASSIGNED' : 'UNASSIGNED',
+      agentId,
+      assignedAgentId: agentId,
       issueDateTime: Date.now(),
       resolvedAt: null,
       attachments: []
@@ -999,62 +1313,22 @@ document.getElementById('create-ticket-btn')
     store.add(ticket).onsuccess = () => {
       console.log('[SUPERVISOR] Ticket created', ticket);
 
-      // clear form
+      if (agentId) {
+        sendMessage({
+          type: 'ASSIGN_TICKET',
+          agentId,
+          payload: ticket
+        });
+      }
+
       document.getElementById('new-issue-type').value = '';
       document.getElementById('new-description').value = '';
-
-      loadTickets(); // refresh Raised Tickets
-    };
-});
-document.getElementById('create-ticket-btn')
-  ?.addEventListener('click', async () => {
-
-    if (!selectedAgentId) {
-      alert('Select an agent first');
-      return;
-    }
-
-    const issueType =
-      document.getElementById('new-issue-type').value.trim();
-    const description =
-      document.getElementById('new-description').value.trim();
-
-    if (!issueType) {
-      alert('Issue type required');
-      return;
-    }
-
-    const ticket = {
-      ticketId: crypto.randomUUID(),
-      issueType,
-      description,
-      status: 'ASSIGNED',
-      agentId: selectedAgentId,
-      assignedAgentId: selectedAgentId,
-      issueDateTime: Date.now(),
-      resolvedAt: null,
-      attachments: []
-    };
-
-    const tx = db.transaction(['tickets'], 'readwrite');
-    const store = tx.objectStore('tickets');
-
-    store.add(ticket).onsuccess = () => {
-      console.log('[SUPERVISOR] Ticket created & assigned', ticket);
-
-      //Notify agent 
-      sendMessage({
-        type: 'ASSIGN_TICKET',
-        agentId: selectedAgentId,
-        payload: ticket
-      });
-      document.getElementById('new-issue-type').value = '';
-      document.getElementById('new-description').value = '';
+      document.getElementById('assign-agent-select').value = '';
+      selectedAgentId = null;
 
       loadTickets();
-      loadTicketsForAgent(selectedAgentId);
     };
-});
+  });
 
 
 

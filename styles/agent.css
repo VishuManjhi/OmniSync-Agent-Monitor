@@ -168,6 +168,7 @@ body {
     ),
     var(--bg-panel);
   border: 1px solid rgba(139, 92, 246, 0.3);
+  overflow: visible;
 }
 
 .section-card:nth-of-type(3)::before {
