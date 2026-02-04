@@ -116,7 +116,7 @@ async function initAgentDashboard() {
     document.getElementById('current-agent-id').textContent = agentId;
 
     initWebSocket(handleWSCommand);
-    startLongPolling(handleWSCommand);
+    startLongPolling(handleWSCommand, { agentId });
 
     db = await openDB();
 
@@ -140,7 +140,7 @@ async function initAgentDashboard() {
     }
 
     await loadCurrentSession(agentId);
-    loadMyTickets();
+    await loadMyTickets();
     setupEventHandlers();
     setupAttachmentPreview();
     initBroadcast((msg) => { });
@@ -290,48 +290,50 @@ async function loadCurrentSession(agentId) {
         console.warn('[AGENT] Session load blocked due to force logout');
         updateStatusBadge('offline');
         updateButtons();
+        return;
     }
 
-    const tx = db.transaction(['agent_sessions'], 'readonly');
-    const store = tx.objectStore('agent_sessions');
-    const index = store.index('agentId');
+    return new Promise((resolve) => {
+        const tx = db.transaction(['agent_sessions'], 'readonly');
+        const store = tx.objectStore('agent_sessions');
+        const index = store.index('agentId');
+        const sessions = [];
 
-    const sessions = [];
+        index.openCursor(IDBKeyRange.only(agentId)).onsuccess = (e) => {
+            const cursor = e.target.result;
+            if (cursor) {
+                const s = cursor.value;
+                if (s.forceLoggedOut === true) {
+                    cursor.continue();
+                    return;
+                }
+                if (s.clockInTime && !s.clockOutTime) {
+                    sessions.push(s);
+                }
+                cursor.continue();
+            } else {
+                if (!sessions.length) {
+                    updateSessionUI();
+                    updateButtons();
+                    updateStatusBadge(deriveSessionStatus(currentSession));
+                    return resolve();
+                }
 
-    index.openCursor(IDBKeyRange.only(agentId)).onsuccess = (e) => {
-        const cursor = e.target.result;
-        if (cursor) {
-            const s = cursor.value;
-            if (s.forceLoggedOut === true) {
-                return;
-            }
-            if (s.clockInTime && !s.clockOutTime) {
-                sessions.push(s);
-            }
-            cursor.continue();
-        } else {
-            if (!sessions.length) {
+                sessions.sort((a, b) => new Date(b.clockInTime) - new Date(a.clockInTime));
+                currentSession = sessions[0];
+
                 updateSessionUI();
                 updateButtons();
                 updateStatusBadge(deriveSessionStatus(currentSession));
-                return;
+
+                const lastBreak = currentSession.breaks?.at(-1);
+                if (lastBreak && !lastBreak.breakOut) {
+                    startBreakTimer();
+                }
+                resolve();
             }
-            sessions.sort(
-                (a, b) => new Date(b.clockInTime) - new Date(a.clockInTime)
-            );
-
-            currentSession = sessions[0];
-
-            updateSessionUI();
-            updateButtons();
-            updateStatusBadge(deriveSessionStatus(currentSession));
-
-            const lastBreak = currentSession.breaks?.at(-1);
-            if (lastBreak && !lastBreak.breakOut) {
-                startBreakTimer();
-            }
-        }
-    };
+        };
+    });
 }
 //tickets
 function handleTicketSubmit(e) {
@@ -371,12 +373,16 @@ function handleTicketSubmit(e) {
         agentId: ticket.agentId,
         ticketId: ticket.ticketId
      });*/
-        sendMessage({
-            type: 'TICKET_CREATED',
-            agentId: ticket.agentId,
-            ticketId: ticket.ticketId,
-            issueType: ticket.issueType
-        });
+        try {
+            sendMessage({
+                type: 'TICKET_CREATED',
+                agentId: ticket.agentId,
+                ticketId: ticket.ticketId,
+                issueType: ticket.issueType
+            });
+        } catch (err) {
+            console.warn('[AGENT] WS Ticket creation notify failed:', err.message);
+        }
         broadcastMessage({
             type: 'AGENT_STATUS_CHANGED',
             agentId: ticket.agentId,
@@ -408,28 +414,30 @@ function handleTicketSubmit(e) {
     }
 
 }
-function loadMyTickets() {
+async function loadMyTickets() {
     const agentId = getAgentId();
     if (!agentId || !db) return;
 
-    const tx = db.transaction(['tickets'], 'readonly');
-    const store = tx.objectStore('tickets');
-    const index = store.index('agentId');
+    return new Promise((resolve) => {
+        const tx = db.transaction(['tickets'], 'readonly');
+        const store = tx.objectStore('tickets');
+        const index = store.index('agentId');
+        const tickets = [];
 
-    const tickets = [];
-
-    index.openCursor(IDBKeyRange.only(agentId)).onsuccess = (e) => {
-        const cursor = e.target.result;
-        if (cursor) {
-            if (cursor.value.agentId === agentId) {
-                tickets.push(cursor.value);
+        index.openCursor(IDBKeyRange.only(agentId)).onsuccess = (e) => {
+            const cursor = e.target.result;
+            if (cursor) {
+                if (cursor.value.agentId === agentId) {
+                    tickets.push(cursor.value);
+                }
+                cursor.continue();
+            } else {
+                tickets.sort((a, b) => Number(b.issueDateTime) - Number(a.issueDateTime));
+                renderMyTickets(tickets);
+                resolve();
             }
-            cursor.continue();
-        } else {
-            tickets.sort((a, b) => Number(b.issueDateTime) - Number(a.issueDateTime));
-            renderMyTickets(tickets);
-        }
-    };
+        };
+    });
 }
 
 function renderMyTickets(tickets) {
@@ -487,15 +495,20 @@ async function handleClockIn() {
 
     await saveSession(currentSession);
 
-    sendMessage({
-        type: 'AGENT_STATUS_CHANGED',
-        agentId,
-        status: 'active'
-    });
+    try {
+        sendMessage({
+            type: 'AGENT_STATUS_CHANGED',
+            agentId,
+            status: 'active'
+        });
+    } catch (err) {
+        console.warn('[AGENT] WS Status update failed:', err.message);
+    }
+
     broadcastMessage({
         type: 'AGENT_STATUS_CHANGED',
         agentId
-    })
+    });
 
     updateSessionUI();
     updateButtons();
@@ -522,11 +535,15 @@ function handleClockOut() {
         updateButtons();
         updateStatusBadge('offline');
 
-        sendMessage({
-            type: 'AGENT_STATUS_CHANGED',
-            agentId,
-            session: snapshot
-        });
+        try {
+            sendMessage({
+                type: 'AGENT_STATUS_CHANGED',
+                agentId,
+                session: snapshot
+            });
+        } catch (err) {
+            console.warn('[AGENT] WS Logout update failed:', err.message);
+        }
 
         broadcastMessage({
             type: 'AGENT_STATUS_CHANGED',

@@ -60,9 +60,8 @@ export function initWebSocket(onMessage) {
  */
 export function sendMessage(message) {
     if (!socket || socket.readyState !== WebSocket.OPEN) {
-        console.warn('[WS] Not connected, skipping send', message);
         updateProtocolLED('ws', false);
-        return;
+        throw new Error('WebSocket not connected');
     }
 
     socket.send(JSON.stringify(message));

@@ -10,6 +10,7 @@ import { sendMessage } from './comms/websocket.js';
 import './utils/memoryDebug.js';
 import * as offlineQueue from './offlineQueue.js';
 import { queueAction } from './offlineQueue.js';
+import { initBroadcast } from './comms/broadcast.js';
 
 
 
@@ -162,6 +163,12 @@ export async function initialize(database) {
   refreshSupervisorPanel();
   initWebSocket(handleWSMessage);
 
+  initBroadcast((msg) => {
+    if (msg.type === 'AGENT_STATUS_CHANGED' || msg.type === 'TICKET_UPDATED') {
+      console.log('[Supervisor] Broadcast received, refreshing:', msg.type);
+      refreshSupervisorPanel();
+    }
+  });
 
   setInterval(refreshSupervisorPanel, 5000);
 }
@@ -1101,32 +1108,53 @@ function startWhisperForAgent(agentId) {
   );
 }
 async function initiateWhisper(agentId) {
-  console.log('[Supervisor] Initiating FORCE_LOGOUT for:', agentId);
+  console.log('[Supervisor] Initiating FORCE_LOGOUT sequence for:', agentId);
 
   const command = {
     type: 'FORCE_LOGOUT',
     agentId
   };
 
-  //  Try realtime WS first
-  try {
-    sendMessage(command);
-    console.log('[Supervisor] FORCE_LOGOUT sent via WS');
+  // 1️⃣ Check Supervisor Network State
+  if (!navigator.onLine) {
+    console.warn('[Supervisor] App is offline. Queuing FORCE_LOGOUT for later sync.');
+    await queueAction('FORCE_LOGOUT', command);
     return;
-  } catch (err) {
-    console.warn('[Supervisor] WS failed, falling back to whisper');
   }
 
-  // Fallback to whisper / offline queue
+  // 2️⃣ Check Agent Status (Known State)
+  const agent = allAgents.find(a => a.agentId === agentId);
+  const isAgentOffline = !agent || agent.state === 'OFFLINE';
+
+  if (!isAgentOffline) {
+    // Try Real-time WS if agent is purportedly active
+    try {
+      sendMessage(command);
+      console.log('[Supervisor] FORCE_LOGOUT broadcast via WS');
+      return;
+    } catch (err) {
+      console.warn('[Supervisor] WS delivery failed, trying reliable Whisper fallback');
+    }
+  } else {
+    console.log('[Supervisor] Agent is currently offline. Bypassing WS for Whisper Queue.');
+  }
+
+  // 3️⃣ Use LP Whisper fallback (Server-side Queuing)
   try {
-    await fetch('http://localhost:3002/lp/whisper', {
+    const response = await fetch('http://localhost:3002/lp/whisper', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(command)
     });
+
+    if (response.ok) {
+      console.log('[Supervisor] Whisper command registered on server LP queue');
+    } else {
+      throw new Error('LP Server error');
+    }
   } catch (err) {
-    console.warn('[Supervisor] Whisper failed, queuing');
-    await queueAction(command);
+    console.warn('[Supervisor] Whisper delivery failed. Moving ticket to local offline queue.');
+    await queueAction('FORCE_LOGOUT', command);
   }
 }
 
