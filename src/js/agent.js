@@ -119,6 +119,26 @@ async function initAgentDashboard() {
     startLongPolling(handleWSCommand);
 
     db = await openDB();
+
+    // 🏷️ Fetch and Show Agent Name
+    try {
+        const tx = db.transaction(['agents'], 'readonly');
+        const store = tx.objectStore('agents');
+        const req = store.get(agentId);
+        req.onsuccess = () => {
+            const agentProfile = req.result;
+            const nameEl = document.getElementById('agent-display-name');
+            if (nameEl && agentProfile?.name) {
+                nameEl.textContent = agentProfile.name;
+            } else if (nameEl) {
+                nameEl.textContent = 'Agent Profile';
+            }
+        };
+    } catch (e) {
+        console.warn('[AGENT] Could not fetch name from DB', e);
+        document.getElementById('agent-display-name').textContent = 'Agent Profile';
+    }
+
     await loadCurrentSession(agentId);
     loadMyTickets();
     setupEventHandlers();
@@ -417,29 +437,32 @@ function renderMyTickets(tickets) {
     if (!container) return;
 
     container.innerHTML = tickets.length
-        ? tickets.map(t => `
-        <div class="ticket-card" data-id="${t.ticketId}">
-          <strong>${t.issueType}</strong><br>
-          Status: <b>${t.status}</b><br>
-
-          ${t.description
-                ? `<div class="ticket-description">
-                 ${t.description}
-               </div>`
-                : ""
-            }
-
-          ${t.status === "ASSIGNED"
-                ? `<button class="start-btn">Start Work</button>`
-                : t.status === "IN_PROGRESS"
-                    ? `<button class="resolve-btn">Resolve</button>`
-                    : t.status === "RESOLUTION_REQUESTED"
-                        ? `<button class="resolve-btn" disabled>Waiting For Approval</button>`
-                        : ""
-            }
-        </div>
-      `).join("")
-        : `<p class="empty-state">No assigned tickets.</p>`;
+        ? tickets.map(t => {
+            const dateStr = new Date(t.issueDateTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+            return `
+            <div class="ticket-card" data-id="${t.ticketId}">
+                <strong>#${t.ticketId.substring(0, 4).toUpperCase()} — ${t.issueType}</strong>
+                <p>${t.description || "No additional case details provided."}</p>
+                <div class="ticket-status-row">
+                    <span class="status-badge" style="background: rgba(59, 130, 246, 0.1); border-color: rgba(59, 130, 246, 0.2); color: #60a5fa;">
+                        ${t.status}
+                    </span>
+                    <span style="font-size: 11px; opacity: 0.5; font-weight: 700;">${dateStr}</span>
+                </div>
+                <div style="margin-top: 16px;">
+                    ${t.status === "ASSIGNED"
+                    ? `<button class="action-btn btn-primary start-btn" style="width:100%; font-size:11px; padding:10px;">Start Resolution</button>`
+                    : t.status === "IN_PROGRESS"
+                        ? `<button class="action-btn btn-warning resolve-btn" style="width:100%; font-size:11px; padding:10px;">Request Resolution</button>`
+                        : t.status === "RESOLUTION_REQUESTED"
+                            ? `<button class="action-btn resolve-btn" disabled style="width:100%; font-size:11px; padding:10px; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); color: rgba(255,255,255,0.3);">Awaiting Approval</button>`
+                            : ""
+                }
+                </div>
+            </div>
+        `;
+        }).join("")
+        : '<div class="empty-state">No service tickets synchronized for this profile yet.</div>';
 }
 
 

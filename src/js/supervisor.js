@@ -807,33 +807,53 @@ function renderAgentDetails(agentId) {
   const breaks = agent.session?.breaks || [];
 
   container.innerHTML = `
-        <strong>Agent ID:</strong> ${agent.agentId}<br>
-        <strong>Agent:</strong> ${agentNameMap[agent.agentId] ?? agent.agentId}<br>
-        <strong>Status:</strong> ${formatStatus(agent.state)}<br>
-        <strong>Clock In:</strong> ${formatDateTime(agent.clockInTime)}<br>
-        <strong>Clock Out:</strong> ${formatDateTime(agent.clockOutTime)}<br>
-        <strong>Breaks:</strong>
-        ${breaks.length === 0
-      ? '<div><em>No breaks taken</em></div>'
+    <div class="details-card-content">
+      <div class="detail-row">
+        <span class="detail-label">Agent ID</span>
+        <span class="detail-value">${agent.agentId}</span>
+      </div>
+      <div class="detail-row">
+        <span class="detail-label">Full Name</span>
+        <span class="detail-value">${agentNameMap[agent.agentId] ?? agent.agentId}</span>
+      </div>
+      <div class="detail-row">
+        <span class="detail-label">Current Status</span>
+        <span class="status-badge-inline" data-status="${agent.state.toLowerCase().replace('_', '-')}">${formatStatus(agent.state)}</span>
+      </div>
+      <div class="detail-row">
+        <span class="detail-label">Shift Start</span>
+        <span class="detail-value">${agent.clockInTime ? formatDateTime(agent.clockInTime) : '—'}</span>
+      </div>
+      <div class="detail-row">
+        <span class="detail-label">Shift End</span>
+        <span class="detail-value">${agent.clockOutTime ? formatDateTime(agent.clockOutTime) : '—'}</span>
+      </div>
+      
+      <div class="detail-section">
+        <h4 class="section-title">Break History</h4>
+        <div class="break-timeline">
+          ${breaks.length === 0
+      ? '<div class="empty-timeline">No break data available</div>'
       : breaks.map(b => {
         const start = new Date(b.breakIn).getTime();
-        const end = b.breakOut
-          ? new Date(b.breakOut).getTime()
-          : Date.now();
-
+        const end = b.breakOut ? new Date(b.breakOut).getTime() : Date.now();
         const duration = formatDuration(end - start);
 
         return `
-                        <div style="font-size:13px; margin-top:4px">
-                            • ${formatDateTime(b.breakIn)}
-                            →
-                            ${b.breakOut ? formatDateTime(b.breakOut) : '<em>ongoing</em>'}
-                            <span style="opacity:0.7"> (${duration})</span>
-                        </div>
-                    `;
+                <div class="timeline-item">
+                  <div class="timeline-marker"></div>
+                  <div class="timeline-content">
+                    <div class="timeline-time">${formatDateTime(b.breakIn)} — ${b.breakOut ? formatDateTime(b.breakOut) : '<span class="pulse-text">Ongoing</span>'}</div>
+                    <div class="timeline-duration">${duration} total</div>
+                  </div>
+                </div>
+              `;
       }).join('')
     }
-    `;
+        </div>
+      </div>
+    </div>
+  `;
 }
 
 

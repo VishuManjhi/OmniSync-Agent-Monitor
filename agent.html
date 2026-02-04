@@ -49,7 +49,12 @@
     <header class="header">
         <div class="header-left">
             <h1 class="logo">Agent Dashboard</h1>
-            <span class="agent-id" id="agent-id">Agent Id: <span id="current-agent-id">...</span></span>
+            <div style="display: flex; gap: 12px; align-items: center;">
+                <span class="agent-id" id="agent-id">ID: <span id="current-agent-id">...</span></span>
+                <span id="agent-display-name"
+                    style="font-size: 14px; font-weight: 800; color: var(--agent-accent-cyan); text-transform: none; letter-spacing: normal;">Loading
+                    Profile...</span>
+            </div>
         </div>
         <div class="header-right">
             <div class="current-status" id="current-status">
@@ -63,73 +68,75 @@
 
     <main class="main-container">
         <!-- Clock In/Out Section -->
-        <section class="card section-card">
-            <h2 class="section-title">Session Management</h2>
+        <section class="card session-management">
+            <h2 class="section-title">Operations</h2>
             <div class="clock-controls">
                 <button id="clock-in-btn" class="action-btn btn-primary">Clock In</button>
                 <button id="clock-out-btn" class="action-btn btn-secondary" disabled>Clock Out</button>
                 <button id="break-in-btn" class="action-btn btn-warning" disabled>Break In</button>
                 <button id="break-out-btn" class="action-btn btn-info" disabled>Break Out</button>
-                <button id="on-call-btn">On Call</button>
-
+                <button id="on-call-btn" class="action-btn">On Call</button>
             </div>
+
             <div class="session-info">
                 <div class="info-item">
-                    <span class="info-label">Clock In Time:</span>
+                    <span class="info-label">Shift Start</span>
                     <span class="info-value" id="clock-in-time">--:--:--</span>
                 </div>
                 <div class="info-item">
-                    <span class="info-label">Current Status:</span>
-                    <span class="info-value" id="session-status">Not Clocked In</span>
+                    <span class="info-label">Status</span>
+                    <span class="info-value" id="session-status">OFFLINE</span>
                 </div>
                 <div class="info-item">
-                    <span class="info-label">Break Duration:</span>
+                    <span class="info-label">Break Counter</span>
                     <span class="info-value" id="break-duration">00:00:00</span>
                 </div>
             </div>
         </section>
 
         <!-- Ticket Form Section -->
-        <section class="card section-card">
-            <h2 class="section-title">Raise Ticket</h2>
+        <section class="card ticket-submission">
+            <h2 class="section-title">Support Desk</h2>
             <form id="ticket-form" class="ticket-form">
-                <label style="display:block; margin-top:12px;">
-                    Attach call recording / image:
-                    <input type="file" id="attachmentInput" accept="audio/*,image/*" />
-                </label>
-                <div id="attachmentPreview" style="margin-top:10px;"></div>
                 <div class="form-group">
-                    <label for="issue-type">Type of Issue *</label>
+                    <label>Attachments</label>
+                    <input type="file" id="attachmentInput" accept="audio/*,image/*" />
+                    <div id="attachmentPreview" style="margin-top:12px;"></div>
+                </div>
+
+                <div class="form-group">
+                    <label for="issue-type">Case Type</label>
                     <select id="issue-type" name="issueType" required>
-                        <option value="">Select issue type</option>
-                        <option value="FOH">FOH</option>
-                        <option value="BOH">BOH</option>
-                        <option value="KIOSK">KIOSK</option>
-                        <option value="other">Other</option>
+                        <option value="">Select Priority/Tier</option>
+                        <option value="FOH">FOH - Front of House</option>
+                        <option value="BOH">BOH - Back of House</option>
+                        <option value="KIOSK">KIOSK - Terminal</option>
+                        <option value="other">Other - Custom</option>
                     </select>
                 </div>
 
                 <div class="form-group">
-                    <label for="description">Description *</label>
-                    <textarea id="description" name="description" rows="4" required
-                        placeholder="Describe the issue"></textarea>
+                    <label for="description">Case Description</label>
+                    <textarea id="description" name="description" rows="3" required
+                        placeholder="Detail the technical or operational bottleneck..."></textarea>
                 </div>
 
                 <div class="form-row">
                     <div class="form-group">
-                        <label for="call-duration">Call Duration</label>
+                        <label for="call-duration">Call Duration (min)</label>
                         <input type="number" id="call-duration" name="callDuration" min="0" step="1" placeholder="0">
                     </div>
                 </div>
 
-                <button type="submit" class="action-btn btn-primary">Submit Ticket</button>
+                <button type="submit" class="action-btn btn-primary" style="width:100%">Submit Document</button>
             </form>
         </section>
-        <section>
-            <h3>My Tickets</h3>
+
+        <!-- History Section -->
+        <section class="tickets-section">
+            <h2 class="section-title">Personal Ticket History</h2>
             <div id="my-tickets"></div>
         </section>
-
     </main>
     <script>
         const params = new URLSearchParams(window.location.search);
