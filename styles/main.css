@@ -61,6 +61,155 @@
 }
 
 /* ============================================================
+   LIGHT THEME OVERRIDES
+   ============================================================ */
+[data-theme="light"] {
+  /* Light Mode Backgrounds */
+  --bg-dark: #f8fafc;
+  --bg-card: rgba(255, 255, 255, 0.9);
+  --bg-glass: rgba(255, 255, 255, 0.6);
+
+  /* Light Mode Typography */
+  --text-primary: #0f172a;
+  --text-secondary: #334155;
+  --text-muted: #64748b;
+  --text-dim: #94a3b8;
+
+  /* Light Mode Borders */
+  --border-glass: rgba(0, 0, 0, 0.08);
+  --border-bright: rgba(0, 0, 0, 0.12);
+
+  /* Adjusted Accents */
+  --accent-cyan: #0891b2;
+  --accent-blue: #2563eb;
+  --accent-purple: #9333ea;
+  --accent-pink: #db2777;
+
+  /* Status Colors */
+  --green-neon: #059669;
+  --red-neon: #dc2626;
+  --yellow-neon: #d97706;
+  --orange-neon: #ea580c;
+
+  /* Shadows */
+  --shadow-premium: 0 20px 40px -15px rgba(0, 0, 0, 0.1);
+  --shadow-glow-blue: 0 0 20px rgba(59, 130, 246, 0.15);
+}
+
+/* Light mode blob adjustments */
+[data-theme="light"] .bg-blob {
+  opacity: 0.08;
+}
+
+/* ----------------------------------------------------
+   LIGHT MODE COMPONENT OVERRIDES
+   ---------------------------------------------------- */
+
+/* Header */
+[data-theme="light"] .header {
+  background: rgba(255, 255, 255, 0.9);
+  border-bottom-color: var(--border-glass);
+}
+
+[data-theme="light"] .header h1 {
+  background: linear-gradient(135deg, var(--accent-blue) 0%, var(--accent-cyan) 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  text-shadow: none;
+}
+
+/* Header Stats */
+[data-theme="light"] .header-stats {
+  background: rgba(0, 0, 0, 0.03);
+  border-color: var(--border-glass);
+}
+
+[data-theme="light"] .stat-value {
+  color: var(--text-primary);
+}
+
+/* Auth Controls & Connection */
+[data-theme="light"] .connection-status {
+  background: rgba(0, 0, 0, 0.05);
+  border-color: var(--border-glass);
+}
+
+/* Navigation Buttons */
+[data-theme="light"] .nav-btn {
+  background: white;
+  color: var(--text-primary);
+  border-color: var(--border-glass);
+  box-shadow: 0 2px 5px rgba(0, 0, 0, 0.05);
+}
+
+[data-theme="light"] .nav-btn:hover {
+  background: var(--accent-blue);
+  color: white;
+}
+
+/* Dashboard Panels (Grid Sections) */
+[data-theme="light"] .dashboard-grid>section,
+[data-theme="light"] .filter-section {
+  background: rgba(255, 255, 255, 0.85);
+  box-shadow: 0 10px 30px -10px rgba(0, 0, 0, 0.1);
+  border-color: white;
+}
+
+/* Filter Inputs */
+[data-theme="light"] select {
+  background-color: white;
+  color: var(--text-primary);
+  border-color: var(--border-glass);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke='%23334155'%3E%3Cpath stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='M19 9l-7 7-7-7'%3E%3C/path%3E%3C/svg%3E");
+}
+
+/* Agent Cards */
+[data-theme="light"] .agent-card {
+  background: white;
+  border-color: var(--border-glass);
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);
+}
+
+[data-theme="light"] .agent-card:hover {
+  background: #f1f5f9;
+  box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1);
+}
+
+/* Typography Overrides */
+[data-theme="light"] h2,
+[data-theme="light"] .agent-id,
+[data-theme="light"] .stat-label {
+  color: var(--text-primary);
+}
+
+[data-theme="light"] .agent-info-row {
+  border-top-color: var(--border-glass);
+  color: var(--text-secondary);
+}
+
+/* Specific Panel Adjustments */
+[data-theme="light"] .grid-details,
+[data-theme="light"] .grid-create {
+  background-image: none !important;
+  /* Remove dark bg images in light mode */
+  background: white !important;
+}
+
+[data-theme="light"] .grid-details::after,
+[data-theme="light"] .grid-create::after {
+  display: none;
+  /* Remove dark overlays */
+}
+
+/* Heap Widget */
+[data-theme="light"] .heap-widget {
+  background: white !important;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.15) !important;
+  border: 1px solid var(--border-glass) !important;
+  color: var(--text-primary);
+}
+
+/* ============================================================
    BASE LAYOUT & BACKGROUND
    ============================================================ */
 body {
@@ -433,6 +582,33 @@ select:focus {
 #clear-filters-btn:hover {
   background: rgba(34, 211, 238, 0.1);
   border-color: var(--accent-cyan);
+}
+
+.search-input {
+  width: 100%;
+  background: rgba(0, 0, 0, 0.5);
+  border: 1px solid var(--border-glass);
+  border-radius: 12px;
+  padding: 10px 16px;
+  color: #fff;
+  font-size: 14px;
+  transition: var(--transition);
+}
+
+.search-input:focus {
+  outline: none;
+  border-color: var(--accent-blue);
+  background: rgba(0, 0, 0, 0.7);
+}
+
+[data-theme="light"] .search-input {
+  background: white;
+  color: var(--text-primary);
+  border-color: var(--border-glass);
+}
+
+[data-theme="light"] .search-input:focus {
+  background: #f8fafc;
 }
 
 /* ============================================================

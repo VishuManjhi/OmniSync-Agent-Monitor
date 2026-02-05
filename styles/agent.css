@@ -10,6 +10,79 @@
   --agent-glass-blur: 50px;
 }
 
+/* Light Theme for Agent Dashboard */
+[data-theme="light"] {
+  --agent-bg: #f1f5f9;
+  --agent-card-bg: rgba(255, 255, 255, 0.85);
+  --agent-accent-cyan: #0891b2;
+  --agent-accent-blue: #2563eb;
+  --agent-accent-purple: #7c3aed;
+  --agent-border: rgba(0, 0, 0, 0.1);
+}
+
+[data-theme="light"] body {
+  background: linear-gradient(135deg, #f8fafc 0%, #e2e8f0 100%);
+  color: #0f172a;
+}
+
+[data-theme="light"] .header {
+  background: rgba(255, 255, 255, 0.85);
+  border-bottom-color: rgba(0, 0, 0, 0.08);
+}
+
+[data-theme="light"] .header-left h1 {
+  background: linear-gradient(135deg, #0f172a, #475569);
+  -webkit-background-clip: text;
+  background-clip: text;
+}
+
+[data-theme="light"] .agent-id {
+  color: rgba(0, 0, 0, 0.5);
+}
+
+/* Light Mode Input Overrides */
+[data-theme="light"] .ticket-form input,
+[data-theme="light"] .ticket-form select,
+[data-theme="light"] .ticket-form textarea {
+  background: white;
+  border-color: rgba(0, 0, 0, 0.15);
+  color: #0f172a;
+}
+
+[data-theme="light"] select option {
+  background: white;
+  color: #0f172a;
+}
+
+[data-theme="light"] .form-group label,
+[data-theme="light"] .info-label {
+  color: #64748b;
+}
+
+[data-theme="light"] .info-item {
+  background: rgba(0, 0, 0, 0.03);
+  border-color: rgba(0, 0, 0, 0.05);
+}
+
+[data-theme="light"] .info-value {
+  color: #0f172a;
+}
+
+[data-theme="light"] .section-title {
+  color: #0f172a;
+}
+
+[data-theme="light"] input::placeholder,
+[data-theme="light"] textarea::placeholder {
+  color: #94a3b8;
+}
+
+[data-theme="light"] ::-webkit-file-upload-button {
+  background: #e2e8f0;
+  color: #0f172a;
+  border: none;
+}
+
 body {
   margin: 0;
   padding: 0;

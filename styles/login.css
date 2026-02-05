@@ -15,6 +15,53 @@ body {
     /* Fallback */
 }
 
+/* Light Theme for Login Page */
+[data-theme="light"] body {
+    background: linear-gradient(135deg, #f8fafc 0%, #e2e8f0 100%);
+}
+
+[data-theme="light"] body::before {
+    filter: blur(8px) brightness(1.1);
+}
+
+[data-theme="light"] .bg-blob {
+    opacity: 0.15;
+}
+
+[data-theme="light"] .login-card {
+    background: rgba(255, 255, 255, 0.85);
+    border-color: rgba(0, 0, 0, 0.1);
+}
+
+[data-theme="light"] .brand h1 {
+    background: linear-gradient(135deg, #0f172a, #475569);
+    -webkit-background-clip: text;
+    background-clip: text;
+}
+
+[data-theme="light"] .brand p {
+    color: #64748b;
+}
+
+[data-theme="light"] .form-group label {
+    color: #334155;
+}
+
+[data-theme="light"] .input-field {
+    background: rgba(0, 0, 0, 0.03);
+    border-color: rgba(0, 0, 0, 0.1);
+    color: #0f172a;
+}
+
+[data-theme="light"] .input-field::placeholder {
+    color: #94a3b8;
+}
+
+[data-theme="light"] .input-field:focus {
+    border-color: #3b82f6;
+    background: rgba(0, 0, 0, 0.02);
+}
+
 /* Blurred Background Layer */
 body::before {
     content: '';

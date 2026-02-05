@@ -7,6 +7,14 @@
     <title>Restroboard Login</title>
     <link rel="icon" href="./favicon.ico.png" type="image/x-icon">
     <link rel="stylesheet" href="./styles/login.css">
+
+    <!-- Theme Init (must run before body to prevent FOUC) -->
+    <script>
+        (function () {
+            const theme = localStorage.getItem('restro_theme') || 'dark';
+            document.documentElement.dataset.theme = theme;
+        })();
+    </script>
 </head>
 
 <body>
@@ -45,6 +53,11 @@
                     Login
                 </button>
             </div>
+
+            <!-- Theme Toggle -->
+            <button id="theme-toggle-btn"
+                style="position: absolute; top: 15px; right: 15px; background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.2); border-radius: 8px; padding: 8px 12px; font-size: 16px; cursor: pointer;"
+                title="Toggle Theme" onclick="toggleTheme()">☀️</button>
 
         </div>
     </div>
@@ -135,7 +148,25 @@
         // Auto-focus ID field
         window.onload = function () {
             document.getElementById('user-id').focus();
+            updateThemeIcon();
         };
+
+        // Theme Toggle
+        function toggleTheme() {
+            const current = document.documentElement.dataset.theme || 'dark';
+            const next = current === 'dark' ? 'light' : 'dark';
+            document.documentElement.dataset.theme = next;
+            localStorage.setItem('restro_theme', next);
+            updateThemeIcon();
+        }
+
+        function updateThemeIcon() {
+            const btn = document.getElementById('theme-toggle-btn');
+            const theme = document.documentElement.dataset.theme || 'dark';
+            if (btn) {
+                btn.innerHTML = theme === 'light' ? '🌙' : '☀️';
+            }
+        }
     </script>
 </body>
 

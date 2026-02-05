@@ -3,6 +3,7 @@ import { setAgentId, getAgentId } from './utils/sessionStorage.js';
 import { initWebSocket, sendMessage } from './comms/websocket.js';
 import { initBroadcast, broadcastMessage } from './comms/broadcast.js';
 import { startLongPolling } from './comms/longPoll.js';
+import { initTheme } from './utils/themeToggle.js';
 
 let db = null;
 let currentSession = null;

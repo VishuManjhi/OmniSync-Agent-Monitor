@@ -11,6 +11,7 @@ import './utils/memoryDebug.js';
 import * as offlineQueue from './offlineQueue.js';
 import { queueAction } from './offlineQueue.js';
 import { initBroadcast } from './comms/broadcast.js';
+import { initTheme } from './utils/themeToggle.js';
 
 
 

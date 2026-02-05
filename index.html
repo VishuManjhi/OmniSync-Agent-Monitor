@@ -35,6 +35,14 @@
     }
   </script>
 
+  <!-- Theme Init (must run before body to prevent FOUC) -->
+  <script>
+    (function () {
+      const theme = localStorage.getItem('restro_theme') || 'dark';
+      document.documentElement.dataset.theme = theme;
+    })();
+  </script>
+
   <!-- Heap Widget CSS -->
   <style>
     .heap-widget {
@@ -107,6 +115,7 @@
 
       <button id="showAHTBtn" class="nav-btn">AHT</button>
       <button id="diag-btn" class="nav-btn">Diagnostics</button>
+      <button id="theme-toggle-btn" class="nav-btn" title="Toggle Theme">☀️</button>
       <button class="nav-btn logout-btn" onclick="handleLogout()">Logout</button>
     </div>
   </header>
@@ -129,8 +138,7 @@
       <button id="clear-filters-btn">Clear Filters</button>
 
       <div class="search-box" style="margin-left:auto; width:300px;">
-        <input type="text" id="agent-search" placeholder="Search Agent Name or ID..."
-          style="width: 100%; background: rgba(0,0,0,0.5); border: 1px solid var(--border-glass); border-radius: 12px; padding: 10px 16px; color: #fff; font-size: 14px; transition: var(--transition);">
+        <input type="text" id="agent-search" class="search-input" placeholder="Search Agent Name or ID...">
       </div>
     </section>
 

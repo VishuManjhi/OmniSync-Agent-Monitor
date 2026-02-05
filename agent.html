@@ -43,6 +43,14 @@
             window.location.replace('./login.html');
         }
     </script>
+
+    <!-- Theme Init (must run before body to prevent FOUC) -->
+    <script>
+        (function () {
+            const theme = localStorage.getItem('restro_theme') || 'dark';
+            document.documentElement.dataset.theme = theme;
+        })();
+    </script>
 </head>
 
 <body>
@@ -60,6 +68,8 @@
             <div class="current-status" id="current-status">
                 <span class="status-badge" id="status-badge">Offline</span>
             </div>
+            <button id="theme-toggle-btn" class="action-btn"
+                style="margin-left: 10px; padding: 6px 12px; font-size: 16px;" title="Toggle Theme">☀️</button>
             <button class="action-btn" style="margin-left: 10px; padding: 6px 12px; font-size: 13px;"
                 onclick="handleLogout()">Logout</button>
         </div>

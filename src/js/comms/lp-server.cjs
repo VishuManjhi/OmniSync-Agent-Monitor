@@ -22,7 +22,7 @@ const server = http.createServer((req, res) => {
     const url = new URL(req.url, 'http://localhost');
 
     /* ============================
-       1️⃣ Agent Long Poll (GET)
+        Agent Long Poll (GET)
     ============================ */
     if (req.method === 'GET' && url.pathname === '/lp/commands') {
         const agentId = url.searchParams.get('agentId') || 'unknown';
@@ -49,7 +49,7 @@ const server = http.createServer((req, res) => {
     }
 
     /* ============================
-       2️⃣ Supervisor Whisper (POST)
+       Supervisor Whisper (POST)
     ============================ */
     if (req.method === 'POST' && url.pathname === '/lp/whisper') {
         let body = '';
