@@ -86,7 +86,7 @@ async function forceLogout() {
 
     alert('You were force logged out by supervisor');
 
-    // 🛡️ FULL SIGN OUT
+    // FULL SIGN OUT
     sessionStorage.removeItem('restro_auth');
     window.location.replace('./login.html');
 }
@@ -212,7 +212,6 @@ function updateButtons() {
         return;
     }
 }
-
 
 function updateStatusBadge(status) {
     const badge = document.getElementById('status-badge');
