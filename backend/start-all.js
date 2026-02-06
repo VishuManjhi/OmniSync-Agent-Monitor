@@ -5,9 +5,9 @@ import { fileURLToPath } from 'url';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const servers = [
-    { name: 'WS Server', path: './src/js/comms/ws-server.cjs' },
-    { name: 'SSE Server', path: './src/js/comms/sse-server.js' },
-    { name: 'LP Server', path: './src/js/comms/lp-server.cjs' }
+    { name: 'WS Server', path: './servers/ws-server.cjs' },
+    { name: 'SSE Server', path: './servers/sse-server.js' },
+    { name: 'LP Server', path: './servers/lp-server.cjs' }
 ];
 
 servers.forEach(server => {

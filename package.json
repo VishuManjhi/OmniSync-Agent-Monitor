@@ -3,8 +3,8 @@
   "version": "1.0.0",
   "type": "module",
   "scripts": {
-    "start": "node start-all.js",
-    "dev": "node start-all.js"
+    "start": "node backend/start-all.js",
+    "dev": "node backend/start-all.js"
   },
   "dependencies": {
     "ws": "^8.19.0"
