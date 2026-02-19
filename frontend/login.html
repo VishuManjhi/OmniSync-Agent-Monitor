@@ -115,10 +115,9 @@
                     return;
                 }
 
-                // 2. Check Agents
                 if (isAgentCandidate(id, pass)) {
-                    // Let the actual ID pass through (e.g. a4, a6)
-                    const agentId = id;
+                    // Normalize to lowercase (e.g. A1 -> a1)
+                    const agentId = id.toLowerCase();
                     sessionStorage.setItem('restro_auth', JSON.stringify({
                         id: agentId,
                         role: 'agent',

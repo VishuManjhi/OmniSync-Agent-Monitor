@@ -1,17 +1,18 @@
 import { getAllFilters, saveFilter, clearAllFilters, STORAGE_KEYS } from './utils/sessionStorage.js';
-import { openDB } from './db.js';
 import * as state from './state.js';
 import { agentCardTimers, highlightedAgentCards } from './utils/uiWeakState.js';
-import { initWebSocket } from './comms/websocket.js';
-import { startSSE } from './comms/sse.js';
-import { updateProtocolLED } from './utils/connectionLED.js';
-import { startLongPolling } from './comms/longPoll.js';
-import { sendMessage } from './comms/websocket.js';
 import './utils/memoryDebug.js';
-import * as offlineQueue from './offlineQueue.js';
-import { queueAction } from './offlineQueue.js';
-import { initBroadcast } from './comms/broadcast.js';
-import { initTheme } from './utils/themeToggle.js';
+import {
+  fetchAllTickets,
+  fetchQueueStats,
+  fetchAllAgentSessions,
+  fetchAgents,
+  updateTicket as apiUpdateTicket,
+  createOrUpdateTicket as apiCreateTicket,
+  forceLogoutAgent,
+  fetchSupervisorActivity
+} from './api.js';
+import { initWebSocket, sendMessage } from './comms/websocket.js';
 
 
 
@@ -60,16 +61,16 @@ function updateAgentStateMap(session) {
 
   const status = deriveAgentState(session);
   const now = Date.now();
+  const aid = session.agentId.toLowerCase();
 
-  const prev = agentStateMap.get(session.agentId);
+  const prev = agentStateMap.get(aid);
 
   if (!prev || prev.status !== status) {
-    agentStateMap.set(session.agentId, {
+    agentStateMap.set(aid, {
       status,
       since: now
     });
   }
-
 }
 const queueMetrics = {
   queueDepth: 0,
@@ -95,7 +96,6 @@ const incidentSet = new Set();
 window.__incidentSet = incidentSet;
 
 let selectedAgentId = null;
-let db = null;
 let allAgents = [];
 let activeHighlightedCard = null;
 let isWSRefresh = false;
@@ -107,29 +107,17 @@ let cachedPerAgentAHT = null;
 let hasAHTData = false;
 
 
-export async function initialize(database) {
-  db = database || await openDB();
-
+export async function initialize() {
   const storedAgentId = sessionStorage.getItem('monitoredAgentId');
   if (storedAgentId) {
-    selectedAgentId = storedAgentId;
+    selectedAgentId = storedAgentId.toLowerCase();
   }
-  startSSE(handleProtocolStatus, async (stats) => {
-    const [waitingCalls, activeAgents, slaPercent] = await Promise.all([
-      calculateWaitingCalls(db),
-      calculateActiveAgents(db),
-      calculateSLAPercent(db)
-    ]);
 
-    renderQueueStats({
-      waitingCalls,
-      activeAgents,
-      slaPercent
-    });
-  });
+  // Note: openDB removal
+  // db = await openDB(); 
   document.getElementById('assign-agent-select')
     ?.addEventListener('change', (e) => {
-      selectedAgentId = e.target.value || null;
+      selectedAgentId = (e.target.value ? e.target.value.toLowerCase() : null);
 
       document
         .querySelectorAll('.agent-card.highlight')
@@ -158,20 +146,25 @@ export async function initialize(database) {
   setupAHTHandlers();
   AgentGridDelegation();
 
-  await loadAgentNames(db);
-  await seedAgentsIfEmpty(db);
+  await loadAgentNames();
 
-  refreshSupervisorPanel();
-  initWebSocket(handleWSMessage);
-
-  initBroadcast((msg) => {
-    if (msg.type === 'AGENT_STATUS_CHANGED' || msg.type === 'TICKET_UPDATED') {
-      console.log('[Supervisor] Broadcast received, refreshing:', msg.type);
+  // 📡 REST-polling is now a safety net. Real-time uses WS.
+  initWebSocket((data) => {
+    if (data.type === 'AGENT_STATUS_CHANGE' || data.type === 'AGENT_STATUS') {
       refreshSupervisorPanel();
     }
   });
 
-  setInterval(refreshSupervisorPanel, 5000);
+  refreshSupervisorPanel();
+  setInterval(async () => {
+    try {
+      const stats = await fetchQueueStats();
+      renderQueueStats(stats);
+    } catch (err) {
+      console.warn('[Supervisor] Failed to fetch queue stats:', err.message);
+    }
+    refreshSupervisorPanel();
+  }, 5000);
 }
 ahtWorker.onmessage = (e) => {
   const { globalAHT, perAgentAHT } = e.data;
@@ -183,23 +176,28 @@ ahtWorker.onmessage = (e) => {
   console.log('[AHT cached]', { globalAHT, perAgentAHT });
 };
 
-function loadAgents() {
-  const tx = db.transaction(['agent_sessions'], 'readonly');
-  const store = tx.objectStore('agent_sessions');
+async function loadAgents() {
+  try {
+    const [rawAgents, rawSessions] = await Promise.all([
+      fetchAgents(),
+      fetchAllAgentSessions()
+    ]);
 
-  const sessions = [];
+    const sessions = rawSessions.map(normalizeSession);
+    const agents = (rawAgents || []).map(a => ({
+      agentId: a.agentId.toLowerCase(),
+      name: a.name
+    }));
 
-  store.openCursor().onsuccess = (e) => {
-    const cursor = e.target.result;
-    if (cursor) {
-      const session = normalizeSession(cursor.value);
-      sessions.push(session);
+    // Cache names
+    agents.forEach(a => {
+      agentNameMap[a.agentId] = a.name;
+    });
 
-      cursor.continue();
-    } else {
-      processSessions(sessions);
-    }
-  };
+    processSessionsWithAgents(agents, sessions);
+  } catch (err) {
+    console.warn('[Supervisor] Failed to load agents/sessions:', err.message);
+  }
 }
 function formatSecondsToMinSec(seconds) {
   if (seconds == null || isNaN(seconds)) return '—';
@@ -211,36 +209,60 @@ function formatSecondsToMinSec(seconds) {
   return `${mins}m ${secs}s`;
 }
 
-function processSessions(sessions) {
+function processSessionsWithAgents(agentList, sessionList) {
   const map = new Map();
 
-  sessions.forEach(s => {
-    const prev = map.get(s.agentId);
+  // 1. Initialize all agents as OFFLINE
+  agentList.forEach(a => {
+    map.set(a.agentId, {
+      agentId: a.agentId,
+      state: 'OFFLINE',
+      clockInTime: null,
+      clockOutTime: null,
+      session: null
+    });
+  });
 
-    if (!prev) {
-      map.set(s.agentId, s);
-      return;
-    }
+  // 2. Overlay with latest session data
+  sessionList.forEach(s => {
+    const aid = s.agentId.toLowerCase();
+    const prev = map.get(aid);
 
-    const prevIn = new Date(prev.clockInTime || 0).getTime();
-    const currIn = new Date(s.clockInTime || 0).getTime();
+    // Only update if this session is newer than what we might have (redundant but safe)
+    if (prev) {
+      const prevIn = new Date(prev.clockInTime || 0).getTime();
+      const currIn = new Date(s.clockInTime || 0).getTime();
 
-    // newest clock-in always wins
-    if (currIn > prevIn) {
-      map.set(s.agentId, s);
+      if (currIn > prevIn) {
+        map.set(aid, {
+          agentId: aid,
+          state: deriveAgentState(s),
+          clockInTime: s.clockInTime,
+          clockOutTime: s.clockOutTime,
+          session: s
+        });
+      }
+    } else {
+      // Agent not in formal list? Still add them.
+      map.set(aid, {
+        agentId: aid,
+        state: deriveAgentState(s),
+        clockInTime: s.clockInTime,
+        clockOutTime: s.clockOutTime,
+        session: s
+      });
     }
   });
 
-  allAgents = Array.from(map.values()).map(session => ({
-    agentId: session.agentId,
-    state: deriveAgentState(session),
-    clockInTime: session.clockInTime,
-    clockOutTime: session.clockOutTime,
-    session
-  }));
+  allAgents = Array.from(map.values());
 
   allAgents.forEach(agent => {
-    updateAgentStateMap(agent.session);
+    if (agent.session) {
+      updateAgentStateMap(agent.session);
+    } else {
+      // Explicitly mark as offline in state map if no session
+      agentStateMap.set(agent.agentId, { status: 'OFFLINE', since: Date.now() });
+    }
   });
 
   renderAgents();
@@ -258,7 +280,7 @@ function AgentGridDelegation() {
       e.stopPropagation();
 
       const agentId = logoutBtn.dataset.agentId;
-      initiateWhisper(agentId);
+      handleForceLogout(agentId);
       return;
     }
     const card = e.target.closest('.agent-card');
@@ -298,215 +320,39 @@ function handleAgentCardClick(cardEl) {
 
 }
 
-function handleWSMessage(message) {
-  console.log('[WS MESSAGE]', message);
-
-  if (!message || !message.type) return;
-
-  switch (message.type) {
-
-    /* ============================
-       AGENT STATUS CHANGED
-    ============================ */
-    case 'AGENT_STATUS_CHANGED': {
-      console.log('[Supervisor] Agent status change detected, refreshing panel...');
-      refreshSupervisorPanel();
-      break;
-    }
-
-
-    /* ============================
-       TICKETS
-    ============================ */
-    case 'TICKET_CREATED':
-    case 'TICKET_UPDATED': {
-      loadTickets();
-
-      if (message.type === 'TICKET_CREATED') {
-        if (message.issueType) {
-          incidentSet.add(message.issueType);
-          console.log('[IncidentSet]', [...incidentSet]);
-        }
-
-        notifyNewTicket({
-          agentId: message.agentId,
-          issueType: message.issueType
-        });
-      }
-
-      if (selectedAgentId) {
-        loadTicketsForAgent(selectedAgentId);
-      }
-
-      break;
-    }
-
-    default:
-      // ignore unknown WS messages
-      break;
-  }
-}
 
 function persistAgentStatus(agentId, status, sessionPatch = {}) {
-  if (!db) return;
-
-  const tx = db.transaction(['agent_sessions'], 'readwrite');
-  const store = tx.objectStore('agent_sessions');
-
-  store.openCursor().onsuccess = (e) => {
-    const cursor = e.target.result;
-    if (!cursor) return;
-
-    const session = cursor.value;
-    if (session.agentId !== agentId) {
-      cursor.continue();
-      return;
-    }
-
-    // Clock transitions
-    if (status === 'OFFLINE') {
-      session.clockOutTime = new Date().toISOString();
-    }
-
-    if (status === 'ACTIVE') {
-      session.clockOutTime = null;
-    }
-
-    //  Persist break / call state if provided
-    if ('breaks' in sessionPatch) {
-      session.breaks = sessionPatch.breaks;
-    }
-
-    if ('onCall' in sessionPatch) {
-      session.onCall = sessionPatch.onCall;
-    }
-
-    store.put(session);
-  };
+  // Local status persistence removed in favor of API calls from the agent app.
 }
 
-function loadTickets() {
-  const tx = db.transaction(['tickets'], 'readonly');
-  const store = tx.objectStore('tickets');
+async function loadTickets() {
+  try {
+    const tickets = (await fetchAllTickets()).map(normalizeTicket);
 
-  const tickets = [];
+    tickets.sort(
+      (a, b) => new Date(b.issueDateTime) - new Date(a.issueDateTime)
+    );
 
-  store.openCursor().onsuccess = (e) => {
-    const cursor = e.target.result;
-    if (cursor) {
-      tickets.push(normalizeTicket(cursor.value));
-      cursor.continue();
-    } else {
-      tickets.sort(
-        (a, b) => new Date(b.issueDateTime) - new Date(a.issueDateTime)
-      );
-
-      console.log(
-        '[Supervisor] newest tickets:',
-        tickets.slice(0, 5).map(t => ({
-          id: t.ticketId,
-          agent: t.agentId,
-          time: t.issueDateTime
-        }))
-      );
-      renderTickets(tickets);
-      if (ahtWorker) {
-        ahtWorker.postMessage(tickets);
-      }
+    console.log(
+      '[Supervisor] newest tickets:',
+      tickets.slice(0, 5).map(t => ({
+        id: t.ticketId,
+        agent: t.agentId,
+        time: t.issueDateTime
+      }))
+    );
+    renderTickets(tickets);
+    if (ahtWorker) {
+      ahtWorker.postMessage(tickets);
     }
-  };
+  } catch (err) {
+    console.warn('[Supervisor] Failed to load tickets from API:', err.message);
+  }
 }
 // Demo SLA threshold: 30 minutes
 const SLA_THRESHOLD_MS = 30 * 60 * 1000;
 
-async function calculateSLAPercent(db) {
-  const tx = db.transaction(['tickets'], 'readonly');
-  const store = tx.objectStore('tickets');
-
-  let resolvedCount = 0;
-  let slaMetCount = 0;
-
-  return new Promise((resolve) => {
-    store.openCursor().onsuccess = (e) => {
-      const cursor = e.target.result;
-
-      if (!cursor) {
-        // no resolved tickets → 100% SLA for demo stability
-        if (resolvedCount === 0) {
-          resolve(100);
-        } else {
-          resolve(
-            Math.round((slaMetCount / resolvedCount) * 100)
-          );
-        }
-        return;
-      }
-
-      const ticket = cursor.value;
-
-      // Only resolved tickets count for SLA
-      if (
-        ticket.status === 'RESOLVED' &&
-        ticket.issueDateTime &&
-        ticket.resolvedAt
-      ) {
-        resolvedCount++;
-
-        const resolutionTime =
-          ticket.resolvedAt - ticket.issueDateTime;
-
-        if (resolutionTime <= SLA_THRESHOLD_MS) {
-          slaMetCount++;
-        }
-      }
-
-      cursor.continue();
-    };
-  });
-}
-async function calculateWaitingCalls(db) {
-  const tx = db.transaction(['tickets'], 'readonly');
-  const store = tx.objectStore('tickets');
-
-  let count = 0;
-
-  return new Promise((resolve) => {
-    store.openCursor().onsuccess = (e) => {
-      const cursor = e.target.result;
-      if (!cursor) return resolve(count);
-
-      const ticket = cursor.value;
-
-      // tickets not yet resolved are "waiting"
-      if (ticket.status !== 'RESOLVED') {
-        count++;
-      }
-
-      cursor.continue();
-    };
-  });
-}
-async function calculateActiveAgents(db) {
-  const tx = db.transaction(['agent_sessions'], 'readonly');
-  const store = tx.objectStore('agent_sessions');
-
-  let active = new Set();
-
-  return new Promise((resolve) => {
-    store.openCursor().onsuccess = (e) => {
-      const cursor = e.target.result;
-      if (!cursor) return resolve(active.size);
-
-      const session = cursor.value;
-
-      if (!session.clockOutTime) {
-        active.add(session.agentId);
-      }
-
-      cursor.continue();
-    };
-  });
-}
+// Metrics calculations moved to backend API (/api/queue-stats).
 
 function createAgentCard(agent) {
   const card = document.createElement('div');
@@ -660,30 +506,15 @@ function renderTickets(tickets) {
 
       console.warn('[SUPERVISOR] Approving ticket', ticketId);
 
-      //  Supervisor DB is source of truth
-      const tx = db.transaction(['tickets'], 'readwrite');
-      const store = tx.objectStore('tickets');
-
-      store.get(ticketId).onsuccess = (ev) => {
-        const t = ev.target.result;
-        if (!t) return;
-
-        if (t.status !== 'RESOLUTION_REQUESTED') return;
-
-        t.status = 'RESOLVED';
-        t.resolvedAt = Date.now();
-
-        store.put(t).onsuccess = () => {
-          loadTickets(); // UI updates immediately
-        };
-      };
-
-      // notify agent
-      sendMessage({
-        type: 'RESOLUTION_APPROVED',
-        ticketId,
-        agentId: ticket.agentId
-      });
+      try {
+        await apiUpdateTicket(ticketId, {
+          status: 'RESOLVED',
+          resolvedAt: Date.now()
+        });
+        loadTickets(); // Refresh
+      } catch (err) {
+        console.error('Failed to approve ticket:', err);
+      }
 
       return;
     }
@@ -693,36 +524,21 @@ function renderTickets(tickets) {
       e.preventDefault();
       e.stopPropagation();
 
-      const reason = prompt(
-        'Reason for rejection (will be sent to agent):'
-      );
+      const reason = prompt('Reason for rejection:');
       if (!reason) return;
 
       console.warn('[SUPERVISOR] Rejecting ticket', ticketId);
 
-      const tx = db.transaction(['tickets'], 'readwrite');
-      const store = tx.objectStore('tickets');
-
-      store.get(ticketId).onsuccess = (ev) => {
-        const t = ev.target.result;
-        if (!t) return;
-
-        t.status = 'IN_PROGRESS';
-        t.rejectionReason = reason;
-        t.rejectedAt = Date.now();
-
-        store.put(t).onsuccess = () => {
-          loadTickets(); // buttons disappear immediately
-        };
-      };
-
-      // notify agent
-      sendMessage({
-        type: 'RESOLUTION_REJECTED',
-        ticketId,
-        agentId: ticket.agentId,
-        reason
-      });
+      try {
+        await apiUpdateTicket(ticketId, {
+          status: 'IN_PROGRESS',
+          rejectionReason: reason,
+          rejectedAt: Date.now()
+        });
+        loadTickets(); // Refresh
+      } catch (err) {
+        console.error('Failed to reject ticket:', err);
+      }
 
       return;
     }
@@ -733,25 +549,29 @@ function renderTickets(tickets) {
   };
 }
 
-function populateAssignableAgents() {
+async function populateAssignableAgents() {
   const select = document.getElementById('assign-agent-select');
   if (!select) return;
 
-  select.innerHTML = '<option value="">Unassigned</option>';
+  try {
+    const agents = await fetchAgents();
+    // Keep "Unassigned" option
+    select.innerHTML = '<option value="">Unassigned</option>';
 
-  const activeAgents = allAgents.filter(a => a.state === 'ACTIVE');
+    agents.forEach(agent => {
+      const option = document.createElement('option');
+      option.value = agent.agentId;
+      option.textContent = `${agent.name} (${agent.agentId})`;
 
-  activeAgents.forEach(agent => {
-    const opt = document.createElement('option');
-    opt.value = agent.agentId;
-    opt.textContent = agentNameMap[agent.agentId] ?? agent.agentId;
+      if (agent.agentId === selectedAgentId) {
+        option.selected = true;
+      }
 
-    if (agent.agentId === selectedAgentId) {
-      opt.selected = true;
-    }
-
-    select.appendChild(opt);
-  });
+      select.appendChild(option);
+    });
+  } catch (err) {
+    console.warn('[Supervisor] Failed to populate assignable agents:', err);
+  }
 }
 function renderAgents() {
   const filter = getAllFilters().status;
@@ -866,31 +686,19 @@ function renderAgentDetails(agentId) {
 
 
 
-function loadTicketsForAgent(agentId) {
-  const tx = db.transaction(['tickets'], 'readonly');
-  const store = tx.objectStore('tickets');
+async function loadTicketsForAgent(agentId) {
+  try {
+    const rawTickets = await fetchAgentTickets(agentId);
+    const tickets = rawTickets.map(normalizeTicket);
 
-  const tickets = [];
+    tickets.sort(
+      (a, b) => new Date(b.issueDateTime) - new Date(a.issueDateTime)
+    );
 
-  store.openCursor().onsuccess = (e) => {
-    const cursor = e.target.result;
-
-    if (cursor) {
-      const ticket = normalizeTicket(cursor.value);
-
-      if (ticket.agentId === agentId) {
-        tickets.push(ticket);
-      }
-
-      cursor.continue();
-    } else {
-      tickets.sort(
-        (a, b) => new Date(b.issueDateTime) - new Date(a.issueDateTime)
-      );
-
-      renderTicketsInAgentDetails(tickets);
-    }
-  };
+    renderTicketsInAgentDetails(tickets);
+  } catch (err) {
+    console.warn('[Supervisor] Failed to load tickets for agent from API:', err.message);
+  }
 }
 
 function renderAHT(globalAHT, perAgentAHT) {
@@ -1003,24 +811,8 @@ function notifyNewTicket({ agentId, issueType }) {
   }
 }
 async function getAttachmentsForTicket(ticketId) {
-  const db = await openDB();
-  return new Promise((resolve) => {
-    const tx = db.transaction(['attachments'], 'readonly');
-    const store = tx.objectStore('attachments');
-    const index = store.index('ticketId');
-
-    const attachments = [];
-
-    index.openCursor(IDBKeyRange.only(ticketId)).onsuccess = (e) => {
-      const cursor = e.target.result;
-      if (cursor) {
-        attachments.push(cursor.value);
-        cursor.continue();
-      } else {
-        resolve(attachments);
-      }
-    };
-  });
+  // For now, return empty or mock as we are prioritizing core data migration
+  return [];
 }
 function setupFilterHandlers() {
   const filter = document.getElementById('status-filter');
@@ -1102,60 +894,20 @@ function handleProtocolStatus(protocol, status) {
   updateProtocolLED(protocol, status === 'connected');
 }
 
-function startWhisperForAgent(agentId) {
-  startLongPolling(
-    handleSupervisorCommand,
-    { agentId }
-  );
-}
-async function initiateWhisper(agentId) {
-  console.log('[Supervisor] Initiating FORCE_LOGOUT sequence for:', agentId);
+async function handleForceLogout(agentId) {
+  console.log('[Supervisor] Initiating REST + WS force logout for:', agentId);
 
-  const command = {
-    type: 'FORCE_LOGOUT',
-    agentId
-  };
-
-  // 1️⃣ Check Supervisor Network State
-  if (!navigator.onLine) {
-    console.warn('[Supervisor] App is offline. Queuing FORCE_LOGOUT for later sync.');
-    await queueAction('FORCE_LOGOUT', command);
-    return;
-  }
-
-  // 2️⃣ Check Agent Status (Known State)
-  const agent = allAgents.find(a => a.agentId === agentId);
-  const isAgentOffline = !agent || agent.state === 'OFFLINE';
-
-  if (!isAgentOffline) {
-    // Try Real-time WS if agent is purportedly active
-    try {
-      sendMessage(command);
-      console.log('[Supervisor] FORCE_LOGOUT broadcast via WS');
-      return;
-    } catch (err) {
-      console.warn('[Supervisor] WS delivery failed, trying reliable Whisper fallback');
-    }
-  } else {
-    console.log('[Supervisor] Agent is currently offline. Bypassing WS for Whisper Queue.');
-  }
-
-  // 3️⃣ Use LP Whisper fallback (Server-side Queuing)
   try {
-    const response = await fetch('http://localhost:3002/lp/whisper', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(command)
-    });
+    await forceLogoutAgent(agentId);
 
-    if (response.ok) {
-      console.log('[Supervisor] Whisper command registered on server LP queue');
-    } else {
-      throw new Error('LP Server error');
-    }
+    // 📡 Broadcast force logout immediately
+    sendMessage({ type: 'FORCE_LOGOUT', agentId });
+
+    console.log('[Supervisor] Force logout command sent');
+    alert(`Logout command sent for agent ${agentId}. They will be logged out immediately via WebSocket.`);
   } catch (err) {
-    console.warn('[Supervisor] Whisper delivery failed. Moving ticket to local offline queue.');
-    await queueAction('FORCE_LOGOUT', command);
+    console.error('[Supervisor] Force logout failed:', err.message);
+    alert('Failed to initiate force logout: ' + err.message);
   }
 }
 
@@ -1191,48 +943,18 @@ function runEventLoopDiagnostic() {
 
   console.log('%c[DIAG] Sync end', 'color: cyan');
 }
-async function seedAgentsIfEmpty(db) {
-  const tx = db.transaction(['agents'], 'readwrite');
-  const store = tx.objectStore('agents');
-
-  const countReq = store.count();
-  countReq.onsuccess = () => {
-    if (countReq.result > 0) return;
-
-    store.put({ agentId: 'a1', name: 'Vishu' });
-    store.put({ agentId: 'a2', name: 'Rishika' });
-    store.put({ agentId: 'a3', name: 'Nirma' });
-    store.put({ agentId: 'a4', name: 'Arjun' });
-    store.put({ agentId: 'a5', name: 'Priya' });
-    store.put({ agentId: 'a6', name: 'Rohan' });
-    store.put({ agentId: 'a7', name: 'Ananya' });
-    store.put({ agentId: 'a8', name: 'Kabir' });
-    store.put({ agentId: 'a9', name: 'Ishani' });
-    store.put({ agentId: 'a10', name: 'Reyansh' });
-
-    console.log('[DB] Agent names seeded');
-  };
-}
-async function loadAgentNames(db) {
-  return new Promise((resolve) => {
-    const tx = db.transaction(['agents'], 'readonly');
-    const store = tx.objectStore('agents');
-
+async function loadAgentNames() {
+  try {
+    const agents = await fetchAgents();
     const map = {};
-
-    store.openCursor().onsuccess = (e) => {
-      const cursor = e.target.result;
-      if (!cursor) {
-        agentNameMap = map;
-        console.log('[Supervisor] Agent names loaded', agentNameMap);
-        resolve();
-        return;
-      }
-
-      map[cursor.key] = cursor.value.name;
-      cursor.continue();
-    };
-  });
+    agents.forEach(a => {
+      map[a.agentId] = a.name;
+    });
+    agentNameMap = map;
+    console.log('[Supervisor] Agent names loaded', agentNameMap);
+  } catch (err) {
+    console.warn('[Supervisor] Failed to load agent names from API:', err.message);
+  }
 }
 
 
@@ -1245,15 +967,25 @@ function setupModalHandlers() {
 
   if (closeBtn) {
     closeBtn.addEventListener('click', closeTicketModal);
-    // Explicitly log to debug
-    console.log('[Supervisor] Modal close button listener attached');
-  } else {
-    console.error('[Supervisor] Close button NOT found');
   }
 
   if (backdrop) {
     backdrop.addEventListener('click', closeTicketModal);
   }
+
+  // Activity Log Handlers
+  const activityBtn = document.getElementById('showActivityLogBtn');
+  const activityCloseBtn = document.getElementById('closeActivityLogBtn');
+  const activityOverlay = document.getElementById('activityLogOverlay');
+
+  activityBtn?.addEventListener('click', async () => {
+    activityOverlay?.classList.remove('hidden');
+    await loadSupervisorActivity();
+  });
+
+  activityCloseBtn?.addEventListener('click', () => {
+    activityOverlay?.classList.add('hidden');
+  });
 
   // Also handle Escape key
   document.addEventListener('keydown', (e) => {
@@ -1262,8 +994,40 @@ function setupModalHandlers() {
       if (modal && !modal.classList.contains('hidden')) {
         closeTicketModal();
       }
+      activityOverlay?.classList.add('hidden');
     }
   });
+}
+
+async function loadSupervisorActivity() {
+  const authDataJson = sessionStorage.getItem('restro_auth');
+  const authData = authDataJson ? JSON.parse(authDataJson) : {};
+  const supervisorId = authData.id || 'admin';
+  const tbody = document.getElementById('activity-log-body');
+  if (!tbody) return;
+
+  tbody.innerHTML = '<tr><td colspan="5" style="padding: 20px; text-align: center;">Loading activity...</td></tr>';
+
+  try {
+    const activity = await fetchSupervisorActivity(supervisorId);
+    if (!activity || activity.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="5" style="padding: 20px; text-align: center;">No activity found</td></tr>';
+      return;
+    }
+
+    tbody.innerHTML = activity.map(t => `
+      <tr style="border-bottom: 1px solid rgba(255,255,255,0.05);">
+        <td style="padding: 10px;">${formatDateTime(t.issueDateTime)}</td>
+        <td style="padding: 10px;">${t.ticketId.slice(0, 8)}...</td>
+        <td style="padding: 10px;">${agentNameMap[t.agentId] || t.agentId}</td>
+        <td style="padding: 10px;">${t.issueType}</td>
+        <td style="padding: 10px;"><span class="status-badge-inline" data-status="${t.status.toLowerCase()}">${t.status}</span></td>
+      </tr>
+    `).join('');
+  } catch (err) {
+    console.error('[Supervisor] Failed to load activity:', err);
+    tbody.innerHTML = '<tr><td colspan="5" style="padding: 20px; text-align: center; color: var(--accent-red);">Error loading activity</td></tr>';
+  }
 }
 document.getElementById('diag-btn')
   ?.addEventListener('click', runEventLoopDiagnostic);
@@ -1332,7 +1096,7 @@ function setupAHTHandlers() {
   });
 }
 document.getElementById('create-ticket-btn')
-  ?.addEventListener('click', () => {
+  ?.addEventListener('click', async () => {
 
     const issueType =
       document.getElementById('new-issue-type').value.trim();
@@ -1352,6 +1116,9 @@ document.getElementById('create-ticket-btn')
       return;
     }
 
+    const authData = JSON.parse(sessionStorage.getItem('restro_auth') || '{}');
+    const supervisorId = authData.id || 'admin';
+
     const ticket = {
       ticketId: crypto.randomUUID(),
       issueType,
@@ -1359,24 +1126,22 @@ document.getElementById('create-ticket-btn')
       status: agentId ? 'ASSIGNED' : 'UNASSIGNED',
       agentId,
       assignedAgentId: agentId,
+      createdBy: supervisorId,
       issueDateTime: Date.now(),
       resolvedAt: null,
       attachments: []
     };
 
-    const tx = db.transaction(['tickets'], 'readwrite');
-    const store = tx.objectStore('tickets');
+    try {
+      await apiCreateTicket(ticket);
+      console.log('[SUPERVISOR] Ticket created and synced', ticket);
 
-    store.add(ticket).onsuccess = () => {
-      console.log('[SUPERVISOR] Ticket created', ticket);
-
-      if (agentId) {
-        sendMessage({
-          type: 'ASSIGN_TICKET',
-          agentId,
-          payload: ticket
-        });
-      }
+      // 📡 Broadcast assignment immediately
+      sendMessage({
+        type: 'ASSIGN_TICKET',
+        agentId: ticket.agentId,
+        payload: ticket
+      });
 
       document.getElementById('new-issue-type').value = '';
       document.getElementById('new-description').value = '';
@@ -1384,7 +1149,10 @@ document.getElementById('create-ticket-btn')
       selectedAgentId = null;
 
       loadTickets();
-    };
+    } catch (err) {
+      console.error('Failed to create ticket:', err);
+      alert('Failed to create ticket: ' + err.message);
+    }
   });
 
 

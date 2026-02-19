@@ -1,11 +1,15 @@
-import { openDB } from './db.js';
 import { setAgentId, getAgentId } from './utils/sessionStorage.js';
-import { initWebSocket, sendMessage } from './comms/websocket.js';
-import { initBroadcast, broadcastMessage } from './comms/broadcast.js';
-import { startLongPolling } from './comms/longPoll.js';
 import { initTheme } from './utils/themeToggle.js';
+import {
+    saveAgentSession as apiSaveAgentSession,
+    fetchCurrentSession as apiFetchCurrentSession,
+    createOrUpdateTicket as apiCreateOrUpdateTicket,
+    fetchAgentTickets as apiFetchAgentTickets,
+    updateTicket as apiUpdateTicket,
+    fetchAgent as apiFetchAgent
+} from './api.js';
+import { initWebSocket, sendMessage } from './comms/websocket.js';
 
-let db = null;
 let currentSession = null;
 let breakInterval = null;
 let selectedAttachFile = null;
@@ -64,9 +68,11 @@ async function forceLogout() {
         session.clockOutTime = Date.now();
         session.forceLoggedOut = true;
 
-        const tx = db.transaction(['agent_sessions'], 'readwrite');
-        tx.objectStore('agent_sessions').put(session);
-        await new Promise(res => tx.oncomplete = res);
+        try {
+            await apiSaveAgentSession(session);
+        } catch (err) {
+            console.warn('[AGENT] Failed to sync force-logout to API:', err.message);
+        }
     }
 
     // HARD UI RESET (no inference)
@@ -76,13 +82,6 @@ async function forceLogout() {
 
     updateButtons();
     updateStatusBadge('offline');
-
-    // Notify supervisor
-    sendMessage({
-        type: 'AGENT_STATUS_CHANGED',
-        agentId: getAgentId(),
-        status: 'offline'
-    });
 
     alert('You were force logged out by supervisor');
 
@@ -116,27 +115,17 @@ async function initAgentDashboard() {
 
     document.getElementById('current-agent-id').textContent = agentId;
 
-    initWebSocket(handleWSCommand);
-    startLongPolling(handleWSCommand, { agentId });
-
-    db = await openDB();
-
     // 🏷️ Fetch and Show Agent Name
     try {
-        const tx = db.transaction(['agents'], 'readonly');
-        const store = tx.objectStore('agents');
-        const req = store.get(agentId);
-        req.onsuccess = () => {
-            const agentProfile = req.result;
-            const nameEl = document.getElementById('agent-display-name');
-            if (nameEl && agentProfile?.name) {
-                nameEl.textContent = agentProfile.name;
-            } else if (nameEl) {
-                nameEl.textContent = 'Agent Profile';
-            }
-        };
+        const agentProfile = await apiFetchAgent(agentId);
+        const nameEl = document.getElementById('agent-display-name');
+        if (nameEl && agentProfile?.name) {
+            nameEl.textContent = agentProfile.name;
+        } else if (nameEl) {
+            nameEl.textContent = 'Agent Profile';
+        }
     } catch (e) {
-        console.warn('[AGENT] Could not fetch name from DB', e);
+        console.warn('[AGENT] Could not fetch name from API', e);
         document.getElementById('agent-display-name').textContent = 'Agent Profile';
     }
 
@@ -144,8 +133,35 @@ async function initAgentDashboard() {
     await loadMyTickets();
     setupEventHandlers();
     setupAttachmentPreview();
-    initBroadcast((msg) => { });
 
+    // 📡 Initialize Real-time signaling
+    initWebSocket((data) => {
+        if (data.type === 'FORCE_LOGOUT' && data.agentId === agentId) {
+            forceLogout();
+        }
+        if (data.type === 'ASSIGN_TICKET' && data.agentId === agentId) {
+            loadMyTickets();
+            // Optional: browser notification
+        }
+    });
+
+    // Notify supervisor we are online/current status
+    sendMessage({ type: 'AGENT_STATUS', agentId });
+
+    // 📡 REST-Only Status Polling (Safety net for commands)
+    setInterval(async () => {
+        if (!agentId || isForceLoggedOut) return;
+
+        try {
+            const session = await apiFetchCurrentSession(agentId);
+            if (session && session.forceLoggedOut) {
+                console.warn('[AGENT] Force logout detected via polling');
+                forceLogout();
+            }
+        } catch (err) {
+            console.error('[AGENT] Polling check failed:', err.message);
+        }
+    }, 5000);
 }
 
 //uiHelpers
@@ -244,42 +260,33 @@ function startBreakTimer() {
             `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
     }, 1000);
 }
-function updateTicket(ticketId, updater) {
-    const tx = db.transaction(['tickets'], 'readwrite');
-    const store = tx.objectStore('tickets');
-
-    store.get(ticketId).onsuccess = (e) => {
-        const ticket = e.target.result;
-        console.log('[AGENT] Fetched ticket from DB:', ticket);
+async function updateTicket(ticketId, updater) {
+    try {
+        const tickets = await apiFetchAgentTickets(getAgentId());
+        const ticket = tickets.find(t => t.ticketId === ticketId);
 
         if (!ticket) {
-            console.error('[AGENT] Ticket NOT FOUND in IndexedDB:', ticketId);
+            console.error('[AGENT] Ticket NOT FOUND on API:', ticketId);
             return;
         }
 
         updater(ticket);
 
-        store.put(ticket).onsuccess = () => {
-            console.log('[AGENT] Ticket updated & saved:', ticketId, ticket.status);
+        await apiUpdateTicket(ticket.ticketId, {
+            status: ticket.status,
+            resolvedAt: ticket.resolvedAt ?? null,
+            rejectionReason: ticket.rejectionReason ?? null,
+            rejectedAt: ticket.rejectedAt ?? null,
+            assignedAgentId: ticket.assignedAgentId ?? null,
+            startedAt: ticket.startedAt ?? null,
+            resolutionRequestedAt: ticket.resolutionRequestedAt ?? null
+        });
 
-            sendMessage({
-                type: 'TICKET_UPDATED',
-                ticketId: ticket.ticketId,
-                agentId: ticket.agentId,
-                status: ticket.status
-            });
-
-            broadcastMessage({
-                type: 'TICKET_UPDATED',
-                ticketId: ticket.ticketId,
-                agentId: ticket.agentId,
-                status: ticket.status
-            });
-
-            loadMyTickets();
-        };
-
-    };
+        console.log('[AGENT] Ticket updated & synced:', ticketId, ticket.status);
+        loadMyTickets();
+    } catch (err) {
+        console.warn('[AGENT] Failed to update/sync ticket:', err.message);
+    }
 }
 
 //sessionLoad
@@ -293,58 +300,28 @@ async function loadCurrentSession(agentId) {
         return;
     }
 
-    return new Promise((resolve) => {
-        const tx = db.transaction(['agent_sessions'], 'readonly');
-        const store = tx.objectStore('agent_sessions');
-        const index = store.index('agentId');
-        const sessions = [];
+    try {
+        const session = await apiFetchCurrentSession(agentId);
+        currentSession = session || null;
+    } catch (err) {
+        console.warn('[AGENT] Failed to fetch current session from API:', err.message);
+        currentSession = null;
+    }
 
-        index.openCursor(IDBKeyRange.only(agentId)).onsuccess = (e) => {
-            const cursor = e.target.result;
-            if (cursor) {
-                const s = cursor.value;
-                if (s.forceLoggedOut === true) {
-                    cursor.continue();
-                    return;
-                }
-                if (s.clockInTime && !s.clockOutTime) {
-                    sessions.push(s);
-                }
-                cursor.continue();
-            } else {
-                if (!sessions.length) {
-                    updateSessionUI();
-                    updateButtons();
-                    updateStatusBadge(deriveSessionStatus(currentSession));
-                    return resolve();
-                }
+    updateSessionUI();
+    updateButtons();
+    updateStatusBadge(deriveSessionStatus(currentSession));
 
-                sessions.sort((a, b) => new Date(b.clockInTime) - new Date(a.clockInTime));
-                currentSession = sessions[0];
-
-                updateSessionUI();
-                updateButtons();
-                updateStatusBadge(deriveSessionStatus(currentSession));
-
-                const lastBreak = currentSession.breaks?.at(-1);
-                if (lastBreak && !lastBreak.breakOut) {
-                    startBreakTimer();
-                }
-                resolve();
-            }
-        };
-    });
+    const lastBreak = currentSession?.breaks?.at(-1);
+    if (lastBreak && !lastBreak.breakOut) {
+        startBreakTimer();
+    }
 }
 //tickets
-function handleTicketSubmit(e) {
+async function handleTicketSubmit(e) {
     e.preventDefault();
     console.log('selectedAttachFile:', selectedAttachFile);
     console.log('handleTicketSubmit fired');
-
-    if (!db) {
-        console.error('DB not ready');
-        return;
-    }
 
     const formEl = e.currentTarget;
     const form = new FormData(formEl);
@@ -361,83 +338,42 @@ function handleTicketSubmit(e) {
         attachments: []
     };
 
-    const tx = db.transaction(['tickets', 'attachments'], 'readwrite');
-    const ticketStore = tx.objectStore('tickets');
-    const attachmentStore = tx.objectStore('attachments');
-
-
-    ticketStore.add(ticket).onsuccess = () => {
-        console.log('Ticket saved', ticket.ticketId);
-        /*sendMessage({
-        type: 'TICKET_CREATED',
-        agentId: ticket.agentId,
-        ticketId: ticket.ticketId
-     });*/
-        try {
-            sendMessage({
-                type: 'TICKET_CREATED',
-                agentId: ticket.agentId,
-                ticketId: ticket.ticketId,
-                issueType: ticket.issueType
-            });
-        } catch (err) {
-            console.warn('[AGENT] WS Ticket creation notify failed:', err.message);
-        }
-        broadcastMessage({
-            type: 'AGENT_STATUS_CHANGED',
-            agentId: ticket.agentId,
-            ticketId: ticket.ticketId,
-            issueType: ticket.issueType
-        })
-        formEl.reset();
-        loadMyTickets();
-    };
-    alert(' Ticket raised successfully');
-
-    ticketStore.onerror = (e) => {
-        console.error(' Ticket save failed', e.target.error);
-    };
+    // Note: Attachment handling simplified as API doesn't fully support binary blobs in this mock
     if (selectedAttachFile) {
-        const attachment = {
+        ticket.attachments.push({
             attachmentId: crypto.randomUUID(),
-            ticketId: ticket.ticketId,
-            agentId: ticket.agentId,
             fileName: selectedAttachFile.name,
             type: selectedAttachFile.type,
-            size: selectedAttachFile.size,
-            blob: selectedAttachFile,
-        };
-        attachmentStore.add(attachment);
-        tx.oncomplete = () => {
-            console.log('Ticket + attachment transaction committed');
-        };
+            size: selectedAttachFile.size
+        });
     }
 
+    try {
+        await apiCreateOrUpdateTicket(ticket);
+        console.log('Ticket synced', ticket.ticketId);
+        formEl.reset();
+        selectedAttachFile = null;
+        const attachmentPreview = document.getElementById('attachmentPreview');
+        if (attachmentPreview) attachmentPreview.textContent = '';
+
+        loadMyTickets();
+        alert('Ticket raised successfully');
+    } catch (err) {
+        console.error('Ticket submission failed', err);
+        alert('Failed to raise ticket: ' + err.message);
+    }
 }
 async function loadMyTickets() {
     const agentId = getAgentId();
-    if (!agentId || !db) return;
+    if (!agentId) return;
 
-    return new Promise((resolve) => {
-        const tx = db.transaction(['tickets'], 'readonly');
-        const store = tx.objectStore('tickets');
-        const index = store.index('agentId');
-        const tickets = [];
-
-        index.openCursor(IDBKeyRange.only(agentId)).onsuccess = (e) => {
-            const cursor = e.target.result;
-            if (cursor) {
-                if (cursor.value.agentId === agentId) {
-                    tickets.push(cursor.value);
-                }
-                cursor.continue();
-            } else {
-                tickets.sort((a, b) => Number(b.issueDateTime) - Number(a.issueDateTime));
-                renderMyTickets(tickets);
-                resolve();
-            }
-        };
-    });
+    try {
+        const tickets = await apiFetchAgentTickets(agentId);
+        tickets.sort((a, b) => Number(b.issueDateTime) - Number(a.issueDateTime));
+        renderMyTickets(tickets);
+    } catch (err) {
+        console.warn('[AGENT] Failed to load tickets from API:', err.message);
+    }
 }
 
 function renderMyTickets(tickets) {
@@ -493,91 +429,71 @@ async function handleClockIn() {
         onCall: false
     };
 
-    await saveSession(currentSession);
-
     try {
+        await apiSaveAgentSession(currentSession);
         sendMessage({
-            type: 'AGENT_STATUS_CHANGED',
-            agentId,
-            status: 'active'
+            type: 'AGENT_STATUS_CHANGE',
+            agentId: currentSession.agentId,
+            status: deriveSessionStatus(currentSession)
         });
     } catch (err) {
-        console.warn('[AGENT] WS Status update failed:', err.message);
+        console.warn('[AGENT] Failed to sync clock-in to API:', err.message);
     }
-
-    broadcastMessage({
-        type: 'AGENT_STATUS_CHANGED',
-        agentId
-    });
 
     updateSessionUI();
     updateButtons();
     updateStatusBadge(deriveSessionStatus(currentSession));
 }
 
-function handleClockOut() {
+async function handleClockOut() {
     if (!currentSession) return;
 
-    const agentId = currentSession.agentId; //  snapshot
-
     currentSession.clockOutTime = Date.now();
+    const snapshot = { ...currentSession };
 
-    const tx = db.transaction(['agent_sessions'], 'readwrite');
-    const store = tx.objectStore('agent_sessions');
+    lastCompletedSession = snapshot;
+    currentSession = null;
 
-    store.put(currentSession).onsuccess = () => {
-        const snapshot = { ...currentSession };
+    updateSessionUI();
+    updateButtons();
+    updateStatusBadge('offline');
 
-        lastCompletedSession = snapshot
-        currentSession = null;
-
-        updateSessionUI();
-        updateButtons();
-        updateStatusBadge('offline');
-
-        try {
-            sendMessage({
-                type: 'AGENT_STATUS_CHANGED',
-                agentId,
-                session: snapshot
-            });
-        } catch (err) {
-            console.warn('[AGENT] WS Logout update failed:', err.message);
-        }
-
-        broadcastMessage({
-            type: 'AGENT_STATUS_CHANGED',
-            agentId,
-            session: snapshot
+    try {
+        await apiSaveAgentSession(snapshot);
+        sendMessage({
+            type: 'AGENT_STATUS_CHANGE',
+            agentId: snapshot.agentId,
+            status: 'offline'
         });
-    };
+    } catch (err) {
+        console.warn('[AGENT] Failed to sync session to API:', err.message);
+    }
 }
 
 //on-call
-function handleOnCallToggle() {
+async function handleOnCallToggle() {
     if (!currentSession) return;
 
     currentSession.onCall = !currentSession.onCall;
 
-    const tx = db.transaction(['agent_sessions'], 'readwrite');
-    tx.objectStore('agent_sessions').put(currentSession).onsuccess = () => {
-        updateSessionUI();
-        updateButtons();
-        updateStatusBadge(deriveSessionStatus(currentSession));
+    updateSessionUI();
+    updateButtons();
+    updateStatusBadge(deriveSessionStatus(currentSession));
 
+    try {
+        await apiSaveAgentSession(currentSession);
         sendMessage({
-            type: 'AGENT_STATUS_CHANGED',
-            agentId: currentSession.agentId
+            type: 'AGENT_STATUS_CHANGE',
+            agentId: currentSession.agentId,
+            status: deriveSessionStatus(currentSession)
         });
-        broadcastMessage({
-            type: 'AGENT_STATUS_CHANGED',
-            agentId: currentSession.agentId
-        })
-    };
+    } catch (err) {
+        console.warn('[AGENT] Failed to sync session to API:', err.message);
+    }
 }
 //brekas
 
-function handleBreakIn() {
+async function handleBreakIn() {
     if (!currentSession) return;
 
     currentSession.clockOutTime = null;
@@ -590,25 +506,24 @@ function handleBreakIn() {
         breakOut: null
     });
 
-    const tx = db.transaction(['agent_sessions'], 'readwrite');
-    tx.objectStore('agent_sessions').put(currentSession).onsuccess = () => {
-        startBreakTimer();
-        updateSessionUI();
-        updateButtons();
-        updateStatusBadge(deriveSessionStatus(currentSession));
+    startBreakTimer();
+    updateSessionUI();
+    updateButtons();
+    updateStatusBadge(deriveSessionStatus(currentSession));
 
+    try {
+        await apiSaveAgentSession(currentSession);
         sendMessage({
-            type: 'AGENT_STATUS_CHANGED',
-            agentId: currentSession.agentId
+            type: 'AGENT_STATUS_CHANGE',
+            agentId: currentSession.agentId,
+            status: deriveSessionStatus(currentSession)
         });
-        broadcastMessage({
-            type: 'AGENT_STATUS_CHANGED',
-            agentId: currentSession.agentId
-        })
-    };
+    } catch (err) {
+        console.warn('[AGENT] Failed to sync session to API:', err.message);
+    }
 }
 
-function handleBreakOut() {
+async function handleBreakOut() {
     if (!currentSession) return;
 
     const lastBreak = currentSession.breaks.at(-1);
@@ -616,22 +531,21 @@ function handleBreakOut() {
 
     lastBreak.breakOut = Date.now();
 
-    const tx = db.transaction(['agent_sessions'], 'readwrite');
-    tx.objectStore('agent_sessions').put(currentSession).onsuccess = () => {
-        stopBreakTimer();
-        updateSessionUI();
-        updateButtons();
-        updateStatusBadge(deriveSessionStatus(currentSession));
+    stopBreakTimer();
+    updateSessionUI();
+    updateButtons();
+    updateStatusBadge(deriveSessionStatus(currentSession));
 
+    try {
+        await apiSaveAgentSession(currentSession);
         sendMessage({
-            type: 'AGENT_STATUS_CHANGED',
-            agentId: currentSession.agentId
+            type: 'AGENT_STATUS_CHANGE',
+            agentId: currentSession.agentId,
+            status: deriveSessionStatus(currentSession)
         });
-        broadcastMessage({
-            type: 'AGENT_STATUS_CHANGED',
-            agentId: currentSession.agentId
-        })
-    };
+    } catch (err) {
+        console.warn('[AGENT] Failed to sync session to API:', err.message);
+    }
 }
 function stopBreakTimer() {
     clearInterval(breakInterval);
@@ -641,149 +555,11 @@ function stopBreakTimer() {
         el.textContent = '00:00:00';
     }
 }
-async function handleWSCommand(cmd) {
-    if (!cmd || !cmd.type) return;
-
-    const myId = getAgentId();
-
-    switch (cmd.type) {
+// WebSocket command handler removed: the app now uses REST + MongoDB only.
 
 
 
-        case 'AGENT_STATUS_CHANGED': {
-            break;
-        }
-
-        /* =========================
-           FORCE LOGOUT
-        ========================= */
-        case 'FORCE_LOGOUT': {
-            if (cmd.agentId !== myId) return;
-
-            if (forceLogoutHandled) {
-                console.log('[AGENT] FORCE_LOGOUT already handled, ignoring');
-                return;
-            }
-
-            forceLogoutHandled = true;
-
-            console.warn('[AGENT] Forced logout by supervisor');
-            await forceLogout();
-            break;
-        }
-
-        /* =========================
-           ASSIGN TICKET
-        ========================= */
-        case 'ASSIGN_TICKET': {
-            if (cmd.agentId !== myId) return;
-
-            console.warn('[AGENT] Ticket assigned by supervisor', cmd.payload);
-
-            const ticket = {
-                ...cmd.payload,
-                agentId: myId,
-                status: 'ASSIGNED',
-                assignedBy: 'SUPERVISOR'
-            };
-
-            const tx = db.transaction(['tickets'], 'readwrite');
-            const store = tx.objectStore('tickets');
-
-            store.put(ticket).onsuccess = () => {
-                console.log('[AGENT] Assigned ticket saved', ticket.ticketId);
-                loadMyTickets();
-            };
-
-            break;
-        }
-
-        /* =========================
-           RESOLUTION APPROVED
-        ========================= */
-        case 'RESOLUTION_APPROVED': {
-            if (cmd.agentId !== myId) break;
-
-            // ✅ agent must be online
-            if (!currentSession) {
-                console.warn('[AGENT] Approval ignored, agent offline');
-                break;
-            }
-
-            console.warn('[AGENT] Resolution approved for ticket', cmd.ticketId);
-
-            const tx = db.transaction(['tickets'], 'readwrite');
-            const store = tx.objectStore('tickets');
-
-            store.get(cmd.ticketId).onsuccess = (e) => {
-                const ticket = e.target.result;
-                if (!ticket) return;
-
-                ticket.status = 'RESOLVED';
-                ticket.resolvedAt = Date.now();
-
-                store.put(ticket).onsuccess = () => {
-                    console.log('[AGENT] Ticket resolved after approval', ticket.ticketId);
-                    setTimeout(() => {
-                        loadMyTickets();
-                    }, 0);
-                };
-            };
-
-            break;
-        }
-
-        /* =========================
-           RESOLUTION REJECTED
-        ========================= */
-        case 'RESOLUTION_REJECTED': {
-            if (cmd.agentId !== myId) break;
-
-            //agent must be online
-            if (!currentSession) {
-                console.warn('[AGENT] Rejection ignored, agent offline');
-                break;
-            }
-
-            console.warn('[AGENT] Resolution rejected', cmd.ticketId);
-
-            const tx = db.transaction(['tickets'], 'readwrite');
-            const store = tx.objectStore('tickets');
-
-            store.get(cmd.ticketId).onsuccess = (e) => {
-                const ticket = e.target.result;
-                if (!ticket) return;
-
-                ticket.status = 'IN_PROGRESS';
-                ticket.rejectionReason = cmd.reason;
-                ticket.rejectedAt = Date.now();
-
-                store.put(ticket).onsuccess = () => {
-                    alert(`Resolution rejected by supervisor:\n${cmd.reason}`);
-                    loadMyTickets();
-                };
-            };
-
-            break;
-        }
-
-        /* =========================
-           DEFAULT
-        ========================= */
-        default:
-            break;
-    }
-}
-
-
-
-//DB
-
-async function saveSession(session) {
-    const tx = db.transaction(['agent_sessions'], 'readwrite');
-    tx.objectStore('agent_sessions').put(session);
-    return new Promise(res => tx.oncomplete = res);
-}
+// DB utility removed as we moved to API-only.
 
 
 //events

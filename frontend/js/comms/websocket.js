@@ -1,68 +1,39 @@
-import { updateProtocolLED } from '../utils/connectionLED.js';
-
 let socket = null;
-let listeners = new Set();
-
+let listeners = [];
 
 export function initWebSocket(onMessage) {
-    if (typeof onMessage === 'function') {
-        listeners.add(onMessage);
-    }
+    if (socket && socket.readyState === WebSocket.OPEN) return;
 
-    if (!socket) {
-        socket = new WebSocket('ws://localhost:8080');
+    socket = new WebSocket('ws://localhost:8080');
 
-        updateProtocolLED('ws', false);
+    socket.onopen = () => {
+        console.log('[WS] Connected to server');
+    };
 
-        socket.onopen = () => {
-            console.log('[WS] Connected');
-            updateProtocolLED('ws', true);
-        };
+    socket.onmessage = (event) => {
+        try {
+            const data = JSON.parse(event.data);
+            if (onMessage) onMessage(data);
+            listeners.forEach(l => l(data));
+        } catch (err) {
+            console.error('[WS] Error parsing message:', err);
+        }
+    };
 
-        socket.onmessage = async (event) => {
-            let data;
-            try {
-                data = JSON.parse(event.data);
-            } catch {
-                return;
-            }
-
-            // simulate async workload (event loop demo)
-            await new Promise(r => setTimeout(r, 100));
-
-            listeners.forEach(fn => {
-                try {
-                    fn(data);
-                } catch (err) {
-                    console.error('[WS listener error]', err);
-                }
-            });
-        };
-
-        socket.onerror = (err) => {
-            console.error('[WS] Error', err);
-            updateProtocolLED('ws', false);
-        };
-
-        socket.onclose = () => {
-            console.warn('[WS] Disconnected');
-            updateProtocolLED('ws', false);
-            socket = null;
-            listeners.clear();
-        };
-    }
-
-    return socket;
+    socket.onclose = () => {
+        console.log('[WS] Disconnected. Reconnecting in 3s...');
+        setTimeout(() => initWebSocket(onMessage), 3000);
+    };
 }
 
-/**
- * Send WS message
- */
 export function sendMessage(message) {
-    if (!socket || socket.readyState !== WebSocket.OPEN) {
-        updateProtocolLED('ws', false);
-        throw new Error('WebSocket not connected');
+    if (socket && socket.readyState === WebSocket.OPEN) {
+        socket.send(JSON.stringify(message));
+    } else {
+        console.warn('[WS] Cannot send. Socket not open.');
     }
+}
 
-    socket.send(JSON.stringify(message));
+export function addWSListener(callback) {
+    listeners.push(callback);
 }

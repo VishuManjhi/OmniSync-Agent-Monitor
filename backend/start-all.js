@@ -5,9 +5,8 @@ import { fileURLToPath } from 'url';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const servers = [
-    { name: 'WS Server', path: './servers/ws-server.cjs' },
-    { name: 'SSE Server', path: './servers/sse-server.js' },
-    { name: 'LP Server', path: './servers/lp-server.cjs' }
+    { name: 'API Server', path: './servers/api-server.js' },
+    { name: 'WS Server', path: './servers/ws-server.js' }
 ];
 
 servers.forEach(server => {
@@ -26,6 +25,14 @@ servers.forEach(server => {
             console.log(`${server.name} exited with code ${code}`);
         }
     });
+
+    // Cleanup on parent exit
+    const cleanup = () => {
+        console.log(`Killing ${server.name}...`);
+        child.kill();
+    };
+    process.on('SIGINT', cleanup);
+    process.on('SIGTERM', cleanup);
 });
 
-console.log('All servers initiated. You can now open login.html in your browser.');
+console.log('API server initiated. You can now open login.html in your browser.');

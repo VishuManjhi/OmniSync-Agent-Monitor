@@ -4,9 +4,14 @@
   "type": "module",
   "scripts": {
     "start": "node backend/start-all.js",
-    "dev": "node backend/start-all.js"
+    "dev": "node backend/start-all.js",
+    "clear-ports": "powershell \"@(3003) | % { $conn = Get-NetTCPConnection -LocalPort $_ -ErrorAction SilentlyContinue; if ($conn) { Stop-Process -Id $conn.OwningProcess -Force } }\""
   },
   "dependencies": {
-    "ws": "^8.19.0"
+    "ws": "^8.19.0",
+    "cors": "^2.8.5",
+    "express": "^4.21.2",
+    "mongodb": "^6.9.0",
+    "multer": "^1.4.5-lts.1"
   }
 }

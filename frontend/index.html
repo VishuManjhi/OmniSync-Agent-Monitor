@@ -9,7 +9,7 @@
   <link rel="stylesheet" href="./styles/main.css">
 
   <script>
-    // 🛡️ AUTH GUARD - Supervisor Level
+    //  AUTH GUARD - Supervisor Level
     (function () {
       function checkAuth() {
         const authData = sessionStorage.getItem('restro_auth');
@@ -94,26 +94,8 @@
         </div>
       </div>
 
-      <div class="connection-status">
-        <div class="conn-indicator" title="WebSocket">
-          <span id="ws-dot" class="dot offline"></span>
-          <span>WS</span>
-        </div>
-        <div class="conn-indicator" title="Short Polling">
-          <span id="sp-dot" class="dot offline"></span>
-          <span>SP</span>
-        </div>
-        <div class="conn-indicator" title="Server Sent Events">
-          <span id="sse-dot" class="dot offline"></span>
-          <span>SSE</span>
-        </div>
-        <div class="conn-indicator" title="Long Polling">
-          <span id="lp-dot" class="dot offline"></span>
-          <span>LP</span>
-        </div>
-      </div>
-
       <button id="showAHTBtn" class="nav-btn">AHT</button>
+      <button id="showActivityLogBtn" class="nav-btn">My Activity</button>
       <button id="diag-btn" class="nav-btn">Diagnostics</button>
       <button id="theme-toggle-btn" class="nav-btn" title="Toggle Theme">☀️</button>
       <button class="nav-btn logout-btn" onclick="handleLogout()">Logout</button>
@@ -231,6 +213,35 @@
       <div id="perAgentAHT" class="aht-agent-list"></div>
       <button id="closeAHTBtnSecondary" class="nav-btn"
         style="width:100%; margin: 20px 0 0 0; background: rgba(255,255,255,0.05);">Dismiss</button>
+    </div>
+  </div>
+
+  <!-- ACTIVITY LOG OVERLAY -->
+  <div id="activityLogOverlay" class="aht-overlay hidden">
+    <div class="aht-card" style="width: 800px; max-width: 90vw;">
+      <div class="aht-header">
+        <span>My Activity Log</span>
+        <button id="closeActivityLogBtn"
+          style="background:none; border:none; color:inherit; cursor:pointer; font-size:18px;">✕</button>
+      </div>
+      <div style="padding: 20px; max-height: 60vh; overflow-y: auto;">
+        <table style="width: 100%; border-collapse: collapse; font-size: 13px;">
+          <thead>
+            <tr style="border-bottom: 2px solid rgba(255,255,255,0.1); text-align: left;">
+              <th style="padding: 10px;">Time</th>
+              <th style="padding: 10px;">Ticket ID</th>
+              <th style="padding: 10px;">Assigned To</th>
+              <th style="padding: 10px;">Issue Type</th>
+              <th style="padding: 10px;">Status</th>
+            </tr>
+          </thead>
+          <tbody id="activity-log-body">
+            <tr>
+              <td colspan="5" style="padding: 20px; text-align: center;">Loading activity...</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
     </div>
   </div>
 
