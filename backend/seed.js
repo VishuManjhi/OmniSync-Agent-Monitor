@@ -10,15 +10,9 @@ async function seed() {
 
         const agents = [
             { agentId: 'a1', name: 'Vishu' },
-            { agentId: 'a2', name: 'Jane Smith' },
-            { agentId: 'a3', name: 'Michael Brown' },
-            { agentId: 'a4', name: 'Emily Davis' },
-            { agentId: 'a5', name: 'Chris Wilson' },
-            { agentId: 'a6', name: 'Sarah Miller' },
-            { agentId: 'a7', name: 'David Taylor' },
-            { agentId: 'a8', name: 'Jessica Anderson' },
-            { agentId: 'a9', name: 'Ryan Thomas' },
-            { agentId: 'a10', name: 'Ashley Jackson' }
+            { agentId: 'a2', name: 'JRashi' },
+            { agentId: 'a3', name: 'Aryan' },
+            { agentId: 'a4', name: 'Sameer' }
         ];
 
         await agentsCol.insertMany(agents);

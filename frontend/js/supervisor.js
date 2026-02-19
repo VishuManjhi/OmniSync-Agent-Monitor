@@ -408,25 +408,42 @@ async function renderTicketModal(ticket) {
         <p><strong>Description:</strong></p>
         <p>${ticket.description || '—'}</p>
     `;
-  const attachments = await getAttachmentsForTicket(ticket.ticketId);
+  const attachments = ticket.attachments || [];
 
   if (!attachments.length) {
     attachmentsContainer.innerHTML = '<em>No attachments</em>';
   } else {
     attachmentsContainer.innerHTML = attachments.map(att => {
-      const url = URL.createObjectURL(att.blob);
+      // Create a blob from base64 if content exists
+      let url = '#';
+      if (att.content) {
+        try {
+          const byteCharacters = atob(att.content);
+          const byteNumbers = new Array(byteCharacters.length);
+          for (let i = 0; i < byteCharacters.length; i++) {
+            byteNumbers[i] = byteCharacters.charCodeAt(i);
+          }
+          const byteArray = new Uint8Array(byteNumbers);
+          const blob = new Blob([byteArray], { type: att.type });
+          url = URL.createObjectURL(blob);
+        } catch (e) {
+          console.error('Failed to create blob for attachment:', e);
+        }
+      }
 
       return `
                 <div style="margin-bottom:6px">
-                    📎 ${att.fileName} (${Math.round(att.size / 1024)}kb)
-                    <a
-                        href="${url}"
-                        download="${att.fileName}"
-                        style="margin-left:8px; color:#38bdf8"
-                        onclick="setTimeout(() => URL.revokeObjectURL('${url}'), 1000)"
-                    >
-                        Download
-                    </a>
+                    📎 ${att.fileName} (${Math.round((att.size || 0) / 1024)}kb)
+                    ${url !== '#' ? `
+                      <a
+                          href="${url}"
+                          download="${att.fileName}"
+                          style="margin-left:8px; color:#38bdf8"
+                          onclick="setTimeout(() => URL.revokeObjectURL('${url}'), 5000)"
+                      >
+                          Download
+                      </a>
+                    ` : '<span style="color:red; margin-left:8px">Broken Link</span>'}
                 </div>
             `;
     }).join('');

@@ -115,7 +115,7 @@ async function initAgentDashboard() {
 
     document.getElementById('current-agent-id').textContent = agentId;
 
-    // 🏷️ Fetch and Show Agent Name
+    // Fetch and Show Agent Name
     try {
         const agentProfile = await apiFetchAgent(agentId);
         const nameEl = document.getElementById('agent-display-name');
@@ -134,7 +134,7 @@ async function initAgentDashboard() {
     setupEventHandlers();
     setupAttachmentPreview();
 
-    // 📡 Initialize Real-time signaling
+    // Initialize Real-time signaling
     initWebSocket((data) => {
         if (data.type === 'FORCE_LOGOUT' && data.agentId === agentId) {
             forceLogout();
@@ -148,7 +148,7 @@ async function initAgentDashboard() {
     // Notify supervisor we are online/current status
     sendMessage({ type: 'AGENT_STATUS', agentId });
 
-    // 📡 REST-Only Status Polling (Safety net for commands)
+    //  REST-Only Status Polling (Safety net for commands)
     setInterval(async () => {
         if (!agentId || isForceLoggedOut) return;
 
@@ -338,14 +338,25 @@ async function handleTicketSubmit(e) {
         attachments: []
     };
 
-    // Note: Attachment handling simplified as API doesn't fully support binary blobs in this mock
     if (selectedAttachFile) {
-        ticket.attachments.push({
-            attachmentId: crypto.randomUUID(),
-            fileName: selectedAttachFile.name,
-            type: selectedAttachFile.type,
-            size: selectedAttachFile.size
-        });
+        try {
+            const base64Content = await new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onload = () => resolve(reader.result.split(',')[1]);
+                reader.onerror = reject;
+                reader.readAsDataURL(selectedAttachFile);
+            });
+
+            ticket.attachments.push({
+                attachmentId: crypto.randomUUID(),
+                fileName: selectedAttachFile.name,
+                type: selectedAttachFile.type,
+                size: selectedAttachFile.size,
+                content: base64Content
+            });
+        } catch (err) {
+            console.error('Failed to process attachment:', err);
+        }
     }
 
     try {
@@ -555,11 +566,9 @@ function stopBreakTimer() {
         el.textContent = '00:00:00';
     }
 }
+
 // WebSocket command handler removed: the app now uses REST + MongoDB only.
 
-
-
-// DB utility removed as we moved to API-only.
 
 
 //events
