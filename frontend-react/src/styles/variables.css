@@ -1,0 +1,35 @@
+:root {
+  /* Premium Palette */
+  --bg-deep: #050505;
+  --bg-card: #0f0f0f;
+  --accent-yellow: #facc15;
+  /* Vibrant Yellow */
+  --accent-blue: #3b82f6;
+  /* Royal Blue */
+  --accent-error: #ef4444;
+
+  /* Glassmorphism Refined */
+  --glass-bg: rgba(20, 20, 20, 0.7);
+  --glass-border: rgba(250, 204, 21, 0.1);
+  /* Subtle yellow border */
+  --glass-blur: blur(25px);
+
+  /* Text */
+  --text-primary: #ffffff;
+  --text-secondary: #94a3b8;
+  --text-muted: #475569;
+
+  /* Effects */
+  --shadow-premium: 0 0 40px rgba(0, 0, 0, 0.8), 0 0 1px rgba(250, 204, 21, 0.05);
+  --aura-glow: radial-gradient(circle at 50% 50%, rgba(250, 204, 21, 0.03), transparent 70%);
+}
+
+[data-theme="light"] {
+  --bg-deep: #f8fafc;
+  --bg-accent: #f1f5f9;
+  --glass-bg: rgba(255, 255, 255, 0.6);
+  --glass-border: rgba(0, 0, 0, 0.1);
+  --text-primary: #0f172a;
+  --text-secondary: #475569;
+  --text-muted: #64748b;
+}
