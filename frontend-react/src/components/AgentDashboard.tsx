@@ -260,10 +260,26 @@ const AgentDashboard: React.FC = () => {
         if (!user || !session) return;
 
         try {
-            const updates: Partial<Ticket> = { status };
-            if (status === 'IN_PROGRESS') updates.startedAt = Date.now();
-            if (status === 'RESOLUTION_REQUESTED') updates.resolutionRequestedAt = Date.now();
-            if (status === 'RESOLVED') updates.resolvedAt = Date.now();
+            const local = tickets.find(t => t.ticketId === ticketId);
+            const updates: Partial<Ticket> = {};
+
+            if (status === 'IN_PROGRESS') {
+                updates.status = 'IN_PROGRESS';
+                updates.startedAt = Date.now();
+            } else if (status === 'RESOLUTION_REQUESTED') {
+                // If ticket has no creator recorded, or creator is current agent, resolve directly
+                const canResolveDirectly = !local?.createdBy || local?.createdBy === user.id;
+                if (canResolveDirectly) {
+                    updates.status = 'RESOLVED';
+                    updates.resolvedAt = Date.now();
+                } else {
+                    updates.status = 'RESOLUTION_REQUESTED';
+                    updates.resolutionRequestedAt = Date.now();
+                }
+            } else if (status === 'RESOLVED') {
+                updates.status = 'RESOLVED';
+                updates.resolvedAt = Date.now();
+            }
 
             await updateTicket(ticketId, updates);
             // notify supervisors/others of ticket update
@@ -387,7 +403,7 @@ const AgentDashboard: React.FC = () => {
                                     style={styles.textarea}
                                     value={description}
                                     onChange={(e) => setDescription(e.target.value)}
-                                    placeholder="Detail the technical or operational bottleneck..."
+                                    placeholder="Explain the issue..."
                                     required
                                 />
                             </div>
@@ -462,14 +478,17 @@ const AgentDashboard: React.FC = () => {
                                                 Start Resolution
                                             </button>
                                         )}
-                                        {t.status === 'IN_PROGRESS' && (
-                                            <button
-                                                onClick={() => handleTicketUpdate(t.ticketId, 'RESOLUTION_REQUESTED')}
-                                                style={{ ...styles.actionBtn, borderColor: 'var(--accent-yellow)', color: 'var(--accent-yellow)' }}
-                                            >
-                                                Request Resolution
-                                            </button>
-                                        )}
+                                        {t.status === 'IN_PROGRESS' && (() => {
+                                            const canResolveDirectly = !t.createdBy || t.createdBy === user?.id;
+                                            return (
+                                                <button
+                                                    onClick={() => handleTicketUpdate(t.ticketId, 'RESOLUTION_REQUESTED')}
+                                                    style={{ ...styles.actionBtn, borderColor: 'var(--accent-yellow)', color: 'var(--accent-yellow)' }}
+                                                >
+                                                    {canResolveDirectly ? 'Resolve' : 'Request Resolution'}
+                                                </button>
+                                            );
+                                        })()}
                                         {t.status === 'RESOLUTION_REQUESTED' && (
                                             <div style={styles.awaitingBadge}>
                                                 <AlertCircle size={14} /> Awaiting Approval

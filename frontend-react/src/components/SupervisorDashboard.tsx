@@ -4,10 +4,11 @@ import { useWebSocket } from '../context/SocketContext';
 import { fetchAgents, fetchSessions, fetchQueueStats, updateTicket, forceLogout, createTicket, fetchTickets } from '../api/agent';
 import type { Agent, AgentSession, QueueStats, Ticket } from '../api/types';
 import { Users, Phone, Clock, Activity, LogOut, Search, CheckCircle, Eye, ShieldOff, Plus, X } from 'lucide-react';
+import Modal from './ui/Modal';
 
 const SupervisorDashboard: React.FC = () => {
     const { logout, user } = useAuth();
-    const { lastMessage } = useWebSocket();
+    const { lastMessage, sendMessage } = useWebSocket();
 
     const [agents, setAgents] = useState<Agent[]>([]);
     const [sessions, setSessions] = useState<AgentSession[]>([]);
@@ -19,6 +20,7 @@ const SupervisorDashboard: React.FC = () => {
     const [searchTerm, setSearchTerm] = useState('');
     const [statusFilter, setStatusFilter] = useState('ALL');
     const [view, setView] = useState<'MONITOR' | 'ACTIVITY' | 'WORKSTATION'>('MONITOR');
+    const [activityFilter, setActivityFilter] = useState('ALL');
 
     const resolvedTickets = activity.filter(t => t.status === 'RESOLVED' && t.startedAt && t.resolvedAt);
     const totalAHTMs = resolvedTickets.reduce((acc, t) => acc + (t.resolvedAt! - t.startedAt!), 0);
@@ -316,7 +318,19 @@ const SupervisorDashboard: React.FC = () => {
                     </>
                 ) : view === 'ACTIVITY' ? (
                     <div className="glass-card" style={styles.activityLog}>
-                        <h3 style={styles.sectionTitle}>Recent Activity</h3>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
+                            <h3 style={styles.sectionTitle}>Recent Activity</h3>
+                            <select
+                                value={activityFilter}
+                                onChange={(e) => setActivityFilter(e.target.value)}
+                                style={styles.filterSelect}
+                            >
+                                <option value="ALL">ALL TICKETS</option>
+                                <option value="ACTIVE">ACTIVE</option>
+                                <option value="RESOLVED">RESOLVED</option>
+                                <option value="PRIORITY">PRIORITY {'>'}24h)</option>
+                            </select>
+                        </div>
                         <div style={{ overflowX: 'auto' }}>
                             <table style={styles.table}>
                                 <thead>
@@ -335,16 +349,35 @@ const SupervisorDashboard: React.FC = () => {
                                         .filter(ticket => {
                                             const agent = agents.find(a => a.agentId === ticket.agentId);
                                             const search = searchTerm.toUpperCase();
-                                            return !searchTerm ||
+                                            const matchesSearch = !searchTerm ||
                                                 ticket.ticketId.toUpperCase().includes(search) ||
                                                 ticket.agentId.toUpperCase().includes(search) ||
                                                 (agent && agent.name.toUpperCase().includes(search));
+
+                                            // Priority Logic: > 24 hours (86400000 ms)
+                                            const isPriority = (Date.now() - ticket.issueDateTime) > 86400000 && ticket.status !== 'RESOLVED' && ticket.status !== 'REJECTED';
+
+                                            let matchesFilter = true;
+                                            if (activityFilter === 'ACTIVE') {
+                                                matchesFilter = ticket.status !== 'RESOLVED' && ticket.status !== 'REJECTED';
+                                            } else if (activityFilter === 'RESOLVED') {
+                                                matchesFilter = ticket.status === 'RESOLVED' || ticket.status === 'REJECTED';
+                                            } else if (activityFilter === 'PRIORITY') {
+                                                matchesFilter = isPriority;
+                                            }
+
+                                            return matchesSearch && matchesFilter;
                                         })
                                         .map(ticket => {
                                             const agent = agents.find(a => a.agentId === ticket.agentId);
+                                            const isPriority = (Date.now() - ticket.issueDateTime) > 86400000 && ticket.status !== 'RESOLVED' && ticket.status !== 'REJECTED';
+
                                             return (
                                                 <tr key={ticket.ticketId} style={styles.tr} onClick={() => setSelectedTicket(ticket)}>
-                                                    <td style={{ ...styles.td, fontSize: '0.7rem', color: 'var(--accent-yellow)', fontWeight: '700' }}>{ticket.ticketId}</td>
+                                                    <td style={{ ...styles.td, fontSize: '0.7rem', color: isPriority ? '#ef4444' : 'var(--accent-yellow)', fontWeight: '700' }}>
+                                                        {ticket.ticketId}
+                                                        {isPriority && <div style={{ fontSize: '0.6rem', color: '#ef4444', fontWeight: '800' }}>PRIORITY</div>}
+                                                    </td>
                                                     <td style={styles.td}>
                                                         <div style={{ display: 'flex', flexDirection: 'column' }}>
                                                             <span style={{ fontWeight: '700' }}>{agent?.name || 'Unknown'}</span>
@@ -359,7 +392,8 @@ const SupervisorDashboard: React.FC = () => {
                                                     <td style={styles.td}>
                                                         <span style={{
                                                             ...styles.statusBadge,
-                                                            borderColor: ticket.status === 'RESOLVED' ? '#10b981' : 'var(--accent-yellow)'
+                                                            borderColor: ticket.status === 'RESOLVED' ? '#10b981' : isPriority ? '#ef4444' : 'var(--accent-yellow)',
+                                                            color: ticket.status === 'RESOLVED' ? '#10b981' : isPriority ? '#ef4444' : 'var(--accent-yellow)',
                                                         }}>
                                                             {ticket.status}
                                                         </span>
@@ -430,15 +464,27 @@ const SupervisorDashboard: React.FC = () => {
                     agents={agents}
                     onClose={() => setShowCreateTicket(false)}
                     onSubmit={async (ticketData) => {
-                        const payload = {
+                        const newTicket = {
                             ...ticketData,
                             ticketId: `TICK-${Date.now()}`,
                             issueDateTime: Date.now(),
-                            status: 'OPEN',
+                            status: ticketData.agentId ? 'ASSIGNED' : 'OPEN',
                             createdBy: user?.id,
                             attachments: []
                         };
-                        await createTicket(payload);
+                        await createTicket(newTicket);
+
+                        // Broadcast assignment via WebSocket
+                        if (newTicket.agentId) {
+                            try {
+                                sendMessage({
+                                    type: 'ASSIGN_TICKET',
+                                    agentId: newTicket.agentId,
+                                    ticket: newTicket
+                                });
+                            } catch (e) { console.error('WS Error broadcasting assignment', e); }
+                        }
+
                         setShowCreateTicket(false);
                         const updatedTickets = await fetchTickets();
                         setActivity(updatedTickets);
@@ -464,6 +510,8 @@ const TicketModal: React.FC<{
     onReject: (reason: string) => Promise<void>
 }> = ({ ticket, onClose, onUpdate, onReject }) => {
     const [loading, setLoading] = useState(false);
+    const [isRejecting, setIsRejecting] = useState(false);
+    const [rejectionReason, setRejectionReason] = useState('');
 
     const handleApprove = async () => {
         setLoading(true);
@@ -477,12 +525,11 @@ const TicketModal: React.FC<{
         }
     };
 
-    const handleReject = async () => {
-        const reason = prompt('REASON FOR REJECTION:');
-        if (!reason) return;
+    const handleRejectSubmit = async () => {
+        if (!rejectionReason.trim()) return;
         setLoading(true);
         try {
-            await onReject(reason);
+            await onReject(rejectionReason);
         } catch (err) {
             console.error('Reject failed', err);
             alert('Failed to reject ticket');
@@ -491,44 +538,93 @@ const TicketModal: React.FC<{
         }
     };
 
-    return (
-        <div style={styles.modalOverlay}>
-            <div className="glass-card" style={styles.modal}>
-                <div style={styles.modalHeader}>
-                    <h3 style={styles.modalTitle}>TICKET DETAILS</h3>
-                    <button onClick={onClose} style={styles.iconBtn}><X size={20} /></button>
-                </div>
-                <div style={styles.modalContent}>
-                    <p><strong>TICKET ID:</strong> {ticket.ticketId}</p>
-                    <p><strong>AGENT:</strong> {ticket.agentId}</p>
-                    <p><strong>DESCRIPTION:</strong> {ticket.description}</p>
-                    <p><strong>STATUS:</strong> {ticket.status}</p>
-                </div>
-                <div style={styles.modalActions}>
+    const footer = (
+        <div className="flex gap-3" style={{ width: '100%', justifyContent: 'flex-end', paddingTop: '1rem', borderTop: '1px solid var(--glass-border)' }}>
+            {!isRejecting ? (
+                <>
                     {(ticket.status === 'RESOLUTION_REQUESTED' || ticket.status === 'OPEN') && (
                         <>
                             <button
+                                style={{ ...styles.resolveBtn, cursor: loading ? 'not-allowed' : 'pointer' }}
                                 onClick={handleApprove}
-                                style={styles.resolveBtn}
                                 disabled={loading}
                             >
-                                <CheckCircle size={18} /> APPROVE
+                                <CheckCircle size={16} /> APPROVE
                             </button>
                             <button
-                                onClick={handleReject}
-                                style={styles.rejectBtn}
+                                style={{ ...styles.rejectBtn, cursor: loading ? 'not-allowed' : 'pointer' }}
+                                onClick={() => setIsRejecting(true)}
                                 disabled={loading}
                             >
-                                REJECT
+                                <X size={16} /> REJECT
                             </button>
                         </>
                     )}
-                    <button onClick={onClose} style={styles.closeBtn}>CLOSE</button>
-                </div>
-            </div>
+                    <button style={styles.closeBtn} onClick={onClose}>CLOSE</button>
+                </>
+            ) : (
+                <>
+                    <button
+                        style={{ ...styles.rejectBtn, background: '#ef4444', color: 'white', cursor: loading ? 'not-allowed' : 'pointer' }}
+                        onClick={handleRejectSubmit}
+                        disabled={loading || !rejectionReason.trim()}
+                    >
+                        CONFIRM REJECTION
+                    </button>
+                    <button
+                        style={styles.closeBtn}
+                        onClick={() => { setIsRejecting(false); setRejectionReason(''); }}
+                        disabled={loading}
+                    >
+                        CANCEL
+                    </button>
+                </>
+            )}
         </div>
     );
+
+    return (
+        <Modal open={true} onOpenChange={(v) => { if (!v && !loading) onClose(); }} title={isRejecting ? "REJECT TICKET" : "TICKET DETAILS"} footer={footer}>
+            <div className="space-y-3 text-sm">
+                {!isRejecting ? (
+                    <>
+                        <div style={styles.detailItem}>
+                            <span style={styles.detailLabel}>TICKET ID</span>
+                            <span style={styles.detailValue}>{ticket.ticketId}</span>
+                        </div>
+                        <div style={styles.detailItem}>
+                            <span style={styles.detailLabel}>AGENT</span>
+                            <span style={styles.detailValue}>{ticket.agentId}</span>
+                        </div>
+                        <div style={styles.detailItem}>
+                            <span style={styles.detailLabel}>STATUS</span>
+                            <span style={{ ...styles.statusBadge, width: 'fit-content', fontSize: '0.8rem' }}>{ticket.status}</span>
+                        </div>
+                        <div style={styles.detailItem}>
+                            <span style={styles.detailLabel}>DESCRIPTION</span>
+                            <p style={{ color: 'var(--text-secondary)', marginTop: '4px', lineHeight: '1.5' }}>{ticket.description}</p>
+                        </div>
+                    </>
+                ) : (
+                    <div style={styles.formGroup}>
+                        <label style={styles.label}>REASON FOR REJECTION</label>
+                        <textarea
+                            style={{ ...styles.input, height: '120px', resize: 'none' }}
+                            placeholder="Please provide a reason for rejecting this resolution request..."
+                            value={rejectionReason}
+                            onChange={(e) => setRejectionReason(e.target.value)}
+                            autoFocus
+                        />
+                    </div>
+                )}
+            </div>
+        </Modal>
+    );
 };
+
+
+
+// ... TicketModal ...
 
 const CreateTicketModal: React.FC<{
     agents: Agent[],
@@ -536,6 +632,19 @@ const CreateTicketModal: React.FC<{
     onSubmit: (data: any) => Promise<void>
 }> = ({ agents, onClose, onSubmit }) => {
     const [form, setForm] = useState({ agentId: '', issueType: '', description: '' });
+    const [searchTerm, setSearchTerm] = useState('');
+    const [isDropdownOpen, setIsDropdownOpen] = useState(false);
+
+    const filteredAgents = agents.filter(a =>
+        a.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        a.agentId.toLowerCase().includes(searchTerm.toLowerCase())
+    );
+
+    const handleAgentSelect = (agent: Agent) => {
+        setForm({ ...form, agentId: agent.agentId });
+        setSearchTerm(`${agent.name} (${agent.agentId})`);
+        setIsDropdownOpen(false);
+    };
 
     return (
         <div style={styles.modalOverlay}>
@@ -547,14 +656,81 @@ const CreateTicketModal: React.FC<{
                 <div style={styles.modalContent}>
                     <div style={styles.formGroup}>
                         <label style={styles.label}>ASSIGN TO AGENT</label>
-                        <select
-                            style={styles.input}
-                            value={form.agentId}
-                            onChange={(e) => setForm({ ...form, agentId: e.target.value })}
-                        >
-                            <option value="">UNASSIGNED</option>
-                            {agents.map(a => <option key={a.agentId} value={a.agentId}>{a.name} ({a.agentId})</option>)}
-                        </select>
+                        <div style={{ position: 'relative' }}>
+                            <div style={styles.inputWrapper}>
+                                <Search size={16} style={{ position: 'absolute', left: '12px', color: 'var(--text-muted)' }} />
+                                <input
+                                    style={{ ...styles.input, paddingLeft: '36px' }}
+                                    placeholder="Search Agent..."
+                                    value={searchTerm}
+                                    onChange={(e) => {
+                                        setSearchTerm(e.target.value);
+                                        setIsDropdownOpen(true);
+                                        if (e.target.value === '') setForm({ ...form, agentId: '' });
+                                    }}
+                                    onFocus={() => setIsDropdownOpen(true)}
+                                />
+                                {form.agentId && (
+                                    <button
+                                        onClick={() => { setForm({ ...form, agentId: '' }); setSearchTerm(''); }}
+                                        style={{ position: 'absolute', right: '12px', background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer' }}
+                                    >
+                                        <X size={14} />
+                                    </button>
+                                )}
+                            </div>
+
+                            {isDropdownOpen && (
+                                <div style={{
+                                    position: 'absolute',
+                                    top: '100%',
+                                    left: 0,
+                                    right: 0,
+                                    maxHeight: '200px',
+                                    overflowY: 'auto',
+                                    background: '#0a0a0a',
+                                    border: '1px solid var(--glass-border)',
+                                    borderRadius: '8px',
+                                    marginTop: '4px',
+                                    zIndex: 100,
+                                    boxShadow: '0 4px 20px rgba(0,0,0,0.5)'
+                                }}>
+                                    <div
+                                        style={{ padding: '8px 12px', cursor: 'pointer', borderBottom: '1px solid var(--glass-border)', fontSize: '0.85rem' }}
+                                        onClick={() => {
+                                            setForm({ ...form, agentId: '' });
+                                            setSearchTerm('');
+                                            setIsDropdownOpen(false);
+                                        }}
+                                    >
+                                        <span style={{ color: 'var(--text-muted)' }}>UNASSIGNED</span>
+                                    </div>
+                                    {filteredAgents.map(a => (
+                                        <div
+                                            key={a.agentId}
+                                            style={{
+                                                padding: '8px 12px',
+                                                cursor: 'pointer',
+                                                borderBottom: '1px solid rgba(255,255,255,0.05)',
+                                                display: 'flex',
+                                                justifyContent: 'space-between',
+                                                alignItems: 'center',
+                                                background: form.agentId === a.agentId ? 'rgba(250, 204, 21, 0.1)' : 'transparent'
+                                            }}
+                                            onClick={() => handleAgentSelect(a)}
+                                        >
+                                            <span style={{ fontSize: '0.9rem', fontWeight: '500' }}>{a.name}</span>
+                                            <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>{a.agentId}</span>
+                                        </div>
+                                    ))}
+                                    {filteredAgents.length === 0 && (
+                                        <div style={{ padding: '12px', color: 'var(--text-muted)', fontSize: '0.8rem', textAlign: 'center' }}>
+                                            No agents found
+                                        </div>
+                                    )}
+                                </div>
+                            )}
+                        </div>
                     </div>
                     <div style={styles.formGroup}>
                         <label style={styles.label}>ISSUE TYPE</label>

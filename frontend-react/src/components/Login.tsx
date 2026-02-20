@@ -1,14 +1,12 @@
 import React, { useState } from 'react';
 import { useAuth } from '../context/AuthContext';
-import { LogIn, User, ShieldCheck, Mail, Lock } from 'lucide-react';
+import { User, Lock } from 'lucide-react';
 
-const Login: React.FC = () => {
-    const [role, setRole] = useState<'agent' | 'supervisor'>('agent');
+const SignInForm: React.FC = () => {
     const [userId, setUserId] = useState('');
     const [password, setPassword] = useState('');
     const [error, setError] = useState('');
     const [loading, setLoading] = useState(false);
-
     const { login } = useAuth();
 
     const handleLogin = (e: React.FormEvent) => {
@@ -16,99 +14,99 @@ const Login: React.FC = () => {
         setError('');
 
         if (!userId || !password) {
-            setError('Please enter both ID and Password');
+            setError('Please enter both User ID and Password');
             return;
         }
 
         setLoading(true);
 
-        // Mock auth logic matching existing app
+        // Mock auth logic: Auto-detect role
         setTimeout(() => {
-            const id = userId.toLowerCase();
+            const id = userId.toLowerCase().trim();
+            let detectedRole: 'agent' | 'supervisor' | null = null;
 
-            // Simple validation matching existing app
-            if (role === 'agent') {
-                if (id.startsWith('a') && password === 'agent123') {
-                    login(id, 'agent');
-                } else {
-                    setError('Invalid Agent credentials');
-                }
+            if (id.startsWith('a') && password === 'agent123') {
+                detectedRole = 'agent';
+            } else if ((id === 'admin' || id.startsWith('sup')) && password === 'sup123') {
+                detectedRole = 'supervisor';
+            }
+
+            if (detectedRole) {
+                login(id, detectedRole);
             } else {
-                if ((id === 'admin' || id.startsWith('sup')) && password === 'sup123') {
-                    login(id, 'supervisor');
-                } else {
-                    setError('Invalid Supervisor credentials');
-                }
+                setError('Invalid credentials. Please try again.');
             }
             setLoading(false);
         }, 800);
     };
 
     return (
-        <div className="login-container" style={styles.container}>
-            <div className="glass-card" style={styles.card}>
-                <div style={styles.header}>
-                    <div style={styles.iconContainer}>
-                        <LogIn size={24} color="var(--accent-yellow)" />
+        <div style={styles.card}>
+            <div style={styles.header}>
+                <h2 style={styles.title}>Welcome Back</h2>
+                <p style={styles.subtitle}>Enter your credentials to access the terminal</p>
+            </div>
+
+            <form onSubmit={handleLogin} style={styles.form}>
+                <div style={styles.inputGroup}>
+                    <label style={styles.label}>User ID</label>
+                    <div style={styles.inputWrapper}>
+                        <User size={20} style={styles.inputIcon} />
+                        <input
+                            type="text"
+                            placeholder="Enter your ID"
+                            value={userId}
+                            onChange={(e) => setUserId(e.target.value)}
+                            style={styles.input}
+                        />
                     </div>
-                    <h2 style={styles.title}>RestroBoard</h2>
-                    <p style={styles.subtitle}>Secure Access • Command Terminal</p>
                 </div>
 
-                <div style={styles.tabContainer}>
-                    <button
-                        style={{ ...styles.tab, ...(role === 'agent' ? styles.activeTab : {}) }}
-                        onClick={() => setRole('agent')}
-                    >
-                        <User size={16} /> Agent
-                    </button>
-                    <button
-                        style={{ ...styles.tab, ...(role === 'supervisor' ? styles.activeTab : {}) }}
-                        onClick={() => setRole('supervisor')}
-                    >
-                        <ShieldCheck size={16} /> Supervisor
-                    </button>
+                <div style={styles.inputGroup}>
+                    <label style={styles.label}>Password</label>
+                    <div style={styles.inputWrapper}>
+                        <Lock size={20} style={styles.inputIcon} />
+                        <input
+                            type="password"
+                            placeholder="••••••••"
+                            value={password}
+                            onChange={(e) => setPassword(e.target.value)}
+                            style={styles.input}
+                        />
+                    </div>
                 </div>
 
-                <form onSubmit={handleLogin} style={styles.form}>
-                    <div style={styles.inputGroup}>
-                        <label style={styles.label}>{role === 'agent' ? 'Agent ID' : 'Supervisor ID'}</label>
-                        <div style={styles.inputWrapper}>
-                            <Mail size={18} style={styles.inputIcon} />
-                            <input
-                                type="text"
-                                placeholder={role === 'agent' ? 'AGENT ID' : 'SUPERVISOR ID'}
-                                value={userId}
-                                onChange={(e) => setUserId(e.target.value)}
-                                style={styles.input}
-                            />
-                        </div>
-                    </div>
+                {error && <p style={styles.error}>{error}</p>}
 
-                    <div style={styles.inputGroup}>
-                        <label style={styles.label}>Security Token</label>
-                        <div style={styles.inputWrapper}>
-                            <Lock size={18} style={styles.inputIcon} />
-                            <input
-                                type="password"
-                                placeholder="••••••••"
-                                value={password}
-                                onChange={(e) => setPassword(e.target.value)}
-                                style={styles.input}
-                            />
-                        </div>
-                    </div>
+                <button type="submit" disabled={loading} style={styles.loginBtn}>
+                    {loading ? 'Authenticating...' : 'Sign In'}
+                </button>
+            </form>
 
-                    {error && <p style={styles.error}>{error}</p>}
+            <p style={styles.footer}>
+                Secure System Access • v2.4.0
+            </p>
+        </div>
+    );
+};
 
-                    <button type="submit" disabled={loading} style={styles.loginBtn}>
-                        {loading ? 'Authenticating...' : 'Establish Connection'}
-                    </button>
-                </form>
+const Login: React.FC = () => {
+    return (
+        <div style={styles.container}>
+            {/* Left Side - Restroboard Branding */}
+            <div style={styles.leftPanel}>
+                <div style={styles.decorationCircle} />
+                <div style={styles.brandContainer}>
+                    <h1 style={styles.brandTitle}>RestroBoard</h1>
+                    <p style={styles.brandSubtitle}>
+                        Analyze performance, track metrics, and optimize your workflow with real-time insights.
+                    </p>
+                </div>
+            </div>
 
-                <p style={styles.footer}>
-                    Secure biometric encryption active.
-                </p>
+            {/* Right Side - Login Form */}
+            <div style={styles.rightPanel}>
+                <SignInForm />
             </div>
         </div>
     );
@@ -118,87 +116,114 @@ const styles: Record<string, React.CSSProperties> = {
     container: {
         height: '100vh',
         display: 'flex',
+        flexDirection: 'row',
+        width: '100vw',
+        overflow: 'hidden',
+        background: 'radial-gradient(circle at center, #0a0a0a 0%, #000000 100%)',
+    },
+    leftPanel: {
+        flex: 0.85,
+        display: 'flex',
+        flexDirection: 'column',
         alignItems: 'center',
         justifyContent: 'center',
-        padding: '1rem',
+        padding: '3rem',
+        position: 'relative',
+        overflow: 'hidden',
+        borderRight: '1px solid rgba(255, 255, 255, 0.03)',
+    },
+    rightPanel: {
+        flex: 1,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        padding: '2rem',
+        position: 'relative',
+    },
+    brandContainer: {
+        position: 'relative',
+        zIndex: 10,
+        textAlign: 'center',
+    },
+    brandTitle: {
+        fontSize: '3.5rem',
+        fontWeight: '800',
+        color: '#facc15',
+        letterSpacing: '-0.03em',
+        marginBottom: '1rem',
+        background: 'linear-gradient(to bottom right, #facc15 30%, #a16207 100%)',
+        WebkitBackgroundClip: 'text',
+        WebkitTextFillColor: 'transparent',
+    },
+    brandSubtitle: {
+        fontSize: '1.1rem',
+        color: '#525252',
+        maxWidth: '380px',
+        lineHeight: '1.6',
+        fontWeight: '500',
+    },
+    decorationCircle: {
+        position: 'absolute',
+        width: '1000px',
+        height: '1000px',
+        borderRadius: '50%',
+        background: 'radial-gradient(circle, rgba(20, 20, 20, 1) 0%, transparent 60%)',
+        top: '50%',
+        left: '50%',
+        transform: 'translate(-50%, -50%)',
+        pointerEvents: 'none',
+        zIndex: 0,
     },
     card: {
         width: '100%',
         maxWidth: '420px',
-        padding: '2.5rem',
         display: 'flex',
         flexDirection: 'column',
         gap: '2rem',
+        zIndex: 10,
+        // Added card styles: Dark golden background
+        background: 'linear-gradient(135deg, #1c1905 0%, #171500 50%, #0a0a0a 100%)',
+        padding: '3rem',
+        borderRadius: '24px',
+        border: '1px solid rgba(250, 204, 21, 0.15)',
+        boxShadow: '0 20px 40px rgba(0,0,0,0.6)',
     },
     header: {
-        textAlign: 'center',
-    },
-    iconContainer: {
-        width: '56px',
-        height: '56px',
-        borderRadius: '12px',
-        background: 'rgba(250, 204, 21, 0.05)',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        margin: '0 auto 1.25rem',
-        border: '1px solid rgba(250, 204, 21, 0.1)',
+        textAlign: 'left',
+        marginBottom: '0.5rem',
     },
     title: {
-        fontSize: '2.25rem',
-        fontWeight: '900',
-        color: 'var(--accent-yellow)',
-        letterSpacing: '-0.04em',
-        textTransform: 'uppercase',
+        fontSize: '2rem',
+        fontWeight: '700',
+        color: '#facc15',
+        letterSpacing: '-0.02em',
+        marginBottom: '0.5rem',
+        background: 'linear-gradient(to bottom right, #facc15 30%, #a16207 100%)',
+        WebkitBackgroundClip: 'text',
+        WebkitTextFillColor: 'transparent',
     },
     subtitle: {
-        color: 'var(--text-muted)',
-        fontSize: '0.75rem',
-        marginTop: '0.5rem',
-        letterSpacing: '0.2em',
-        textTransform: 'uppercase',
-        fontWeight: '700',
-    },
-    tabContainer: {
-        background: 'rgba(255, 255, 255, 0.03)',
-        borderRadius: '12px',
-        padding: '4px',
-        display: 'flex',
-        gap: '4px',
-    },
-    tab: {
-        flex: 1,
-        padding: '0.625rem',
-        border: 'none',
-        background: 'transparent',
-        color: 'var(--text-muted)',
-        borderRadius: '8px',
-        fontSize: '0.875rem',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        gap: '8px',
-        fontWeight: '600',
-    },
-    activeTab: {
-        background: 'var(--accent-blue)',
-        color: '#ffffff',
+        color: '#737373', // Lightened slightly for better contrast on dark bg
+        fontSize: '0.95rem',
+        fontWeight: '400',
     },
     form: {
         display: 'flex',
         flexDirection: 'column',
-        gap: '1.25rem',
+        gap: '1.5rem',
     },
     inputGroup: {
         display: 'flex',
         flexDirection: 'column',
-        gap: '0.5rem',
+        gap: '0.75rem',
     },
     label: {
-        fontSize: '0.8125rem',
+        fontSize: '0.8rem',
         fontWeight: '600',
-        color: 'var(--text-secondary)',
+        color: '#a1a1aa', // Lightened for better visibility
         marginLeft: '4px',
+        textTransform: 'uppercase',
+        letterSpacing: '0.05em',
     },
     inputWrapper: {
         position: 'relative',
@@ -207,48 +232,51 @@ const styles: Record<string, React.CSSProperties> = {
     },
     inputIcon: {
         position: 'absolute',
-        left: '12px',
-        color: 'var(--text-muted)',
+        left: '16px',
+        color: '#737373',
+        transition: 'color 0.2s',
     },
     input: {
         width: '100%',
-        background: 'rgba(0, 0, 0, 0.3)',
-        border: '1px solid var(--glass-border)',
-        padding: '0.875rem 0.875rem 0.875rem 2.5rem',
-        borderRadius: '8px',
-        color: 'white',
+        background: 'rgba(0, 0, 0, 0.3)', // Darker input bg
+        border: '1px solid rgba(255, 255, 255, 0.1)',
+        padding: '1.1rem 1.1rem 1.1rem 3rem',
+        borderRadius: '14px',
+        color: '#ffffff',
         outline: 'none',
-        transition: 'all 0.2s',
-        fontSize: '0.9rem',
+        transition: 'all 0.2s cubic-bezier(0.4, 0, 0.2, 1)',
+        fontSize: '0.95rem',
+        fontWeight: '500',
     },
     error: {
-        color: '#f87171',
-        fontSize: '0.8125rem',
+        color: '#ef4444',
+        fontSize: '0.875rem',
         textAlign: 'center',
-        background: 'rgba(248, 113, 113, 0.1)',
-        padding: '8px',
-        borderRadius: '8px',
-        border: '1px solid rgba(248, 113, 113, 0.2)',
+        background: 'rgba(239, 68, 68, 0.1)',
+        padding: '12px',
+        borderRadius: '10px',
+        border: '1px solid rgba(239, 68, 68, 0.2)',
+        fontWeight: '500',
     },
     loginBtn: {
-        background: 'var(--accent-yellow)',
-        color: 'var(--bg-deep)',
+        background: 'linear-gradient(to right, #facc15, #eab308)',
+        color: '#000000',
         border: 'none',
-        padding: '1rem',
-        borderRadius: '8px',
-        fontWeight: '800',
-        fontSize: '0.9rem',
+        padding: '1.1rem',
+        borderRadius: '14px',
+        fontWeight: '700',
+        fontSize: '0.95rem',
         marginTop: '0.5rem',
-        textTransform: 'uppercase',
-        letterSpacing: '0.05em',
-        boxShadow: '0 10px 20px -10px rgba(250, 204, 21, 0.3)',
+        cursor: 'pointer',
+        transition: 'all 0.2s cubic-bezier(0.4, 0, 0.2, 1)',
+        boxShadow: '0 4px 12px rgba(250, 204, 21, 0.2)',
     },
     footer: {
         fontSize: '0.75rem',
-        color: 'var(--text-muted)',
+        color: '#525252',
         textAlign: 'center',
-        letterSpacing: '0.05em',
-        textTransform: 'uppercase',
+        marginTop: '2rem',
+        fontWeight: '500',
     }
 };
 
