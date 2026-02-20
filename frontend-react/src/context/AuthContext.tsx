@@ -1,4 +1,7 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { createContext, useContext, useState } from 'react';
+
+const API_BASE = 'http://localhost:3003';
+const TOKEN_KEY = 'omnisync_jwt';
 
 interface User {
     id: string;
@@ -8,33 +11,54 @@ interface User {
 
 interface AuthContextType {
     user: User | null;
-    login: (id: string, role: 'agent' | 'supervisor') => void;
+    login: (id: string, password: string) => Promise<void>;
     logout: () => void;
     isAuthenticated: boolean;
+}
+
+function decodePayload(token: string): { id: string; role: 'agent' | 'supervisor' } | null {
+    try {
+        const payload = JSON.parse(atob(token.split('.')[1]));
+        return payload;
+    } catch {
+        return null;
+    }
+}
+
+function userFromToken(token: string): User | null {
+    const payload = decodePayload(token);
+    if (!payload) return null;
+    return { id: payload.id, role: payload.role, loginTime: Date.now() };
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
     const [user, setUser] = useState<User | null>(() => {
-        const stored = sessionStorage.getItem('restro_auth');
-        return stored ? JSON.parse(stored) : null;
+        const token = localStorage.getItem(TOKEN_KEY);
+        return token ? userFromToken(token) : null;
     });
 
-    const login = (id: string, role: 'agent' | 'supervisor') => {
-        const normalizedId = id.toLowerCase();
-        const newUser: User = {
-            id: normalizedId,
-            role,
-            loginTime: Date.now()
-        };
-        setUser(newUser);
-        sessionStorage.setItem('restro_auth', JSON.stringify(newUser));
+    const login = async (id: string, password: string): Promise<void> => {
+        const res = await fetch(`${API_BASE}/api/auth/login`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ id, password })
+        });
+
+        if (!res.ok) {
+            const body = await res.json().catch(() => ({}));
+            throw new Error(body.error || 'INVALID_CREDENTIALS');
+        }
+
+        const { token } = await res.json();
+        localStorage.setItem(TOKEN_KEY, token);
+        setUser(userFromToken(token)!);
     };
 
     const logout = () => {
+        localStorage.removeItem(TOKEN_KEY);
         setUser(null);
-        sessionStorage.removeItem('restro_auth');
         window.location.href = '/';
     };
 
@@ -47,8 +71,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
 export const useAuth = () => {
     const context = useContext(AuthContext);
-    if (context === undefined) {
-        throw new Error('useAuth must be used within an AuthProvider');
-    }
+    if (context === undefined) throw new Error('useAuth must be used within an AuthProvider');
     return context;
 };

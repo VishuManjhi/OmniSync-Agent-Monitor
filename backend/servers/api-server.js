@@ -1,12 +1,29 @@
 import express from 'express';
 import cors from 'cors';
+import jwt from 'jsonwebtoken';
 import { getDb, ObjectId } from '../db.js';
+
+const JWT_SECRET = process.env.JWT_SECRET || 'omnisync_super_secret_key_2024';
+const JWT_EXPIRES = '8h';
 
 const app = express();
 const PORT = process.env.PORT || 3003;
 
 app.use(cors());
 app.use(express.json({ limit: '10mb' }));
+
+// ── JWT middleware ─────────────────────────────────────────────────────
+const authenticateToken = (req, res, next) => {
+  const authHeader = req.headers['authorization'];
+  const token = authHeader && authHeader.split(' ')[1]; // Bearer <token>
+  if (!token) return res.status(401).json({ error: 'UNAUTHORIZED' });
+  try {
+    req.user = jwt.verify(token, JWT_SECRET);
+    next();
+  } catch {
+    return res.status(401).json({ error: 'TOKEN_INVALID' });
+  }
+};
 
 app.get('/health', (req, res) => {
   res.json({ status: 'ok' });
@@ -16,6 +33,53 @@ async function collection(name) {
   const db = await getDb();
   return db.collection(name);
 }
+
+// ── Auth ────────────────────────────────────────────────────────────────
+// POST /api/auth/login  — no JWT required
+app.post('/api/auth/login', async (req, res) => {
+  try {
+    const { id, password } = req.body || {};
+    if (!id || !password) {
+      return res.status(400).json({ error: 'MISSING_CREDENTIALS' });
+    }
+
+    const normalizedId = id.toLowerCase().trim();
+    const col = await collection('agents');
+    const user = await col.findOne({ agentId: normalizedId });
+
+    // Fallback: if no DB user found, use config-based mock credentials
+    // This keeps backward-compat while DB is being seeded with passwords
+    let role = null;
+    if (!user) {
+      // Config-based fallback (same logic as old client-side mock)
+      if (normalizedId.startsWith('a') && password === 'agent123') role = 'agent';
+      else if ((normalizedId === 'admin' || normalizedId.startsWith('sup')) && password === 'sup123') role = 'supervisor';
+    } else {
+      // DB user: check stored password (plain text for now; swap for bcrypt later)
+      const storedPassword = user.password;
+      if (!storedPassword) {
+        // No password set → fall back to config defaults
+        if (normalizedId.startsWith('a') && password === 'agent123') role = user.role || 'agent';
+        else if ((normalizedId === 'admin' || normalizedId.startsWith('sup')) && password === 'sup123') role = user.role || 'supervisor';
+      } else if (storedPassword === password) {
+        role = user.role || (normalizedId.startsWith('sup') || normalizedId === 'admin' ? 'supervisor' : 'agent');
+      }
+    }
+
+    if (!role) {
+      return res.status(401).json({ error: 'INVALID_CREDENTIALS' });
+    }
+
+    const token = jwt.sign({ id: normalizedId, role }, JWT_SECRET, { expiresIn: JWT_EXPIRES });
+    res.json({ token, id: normalizedId, role });
+  } catch (err) {
+    console.error('[API] POST /api/auth/login failed', err);
+    res.status(500).json({ error: 'INTERNAL_ERROR' });
+  }
+});
+
+// All routes below require a valid JWT
+app.use('/api', authenticateToken);
 
 // Agents
 app.get('/api/agents', async (req, res) => {

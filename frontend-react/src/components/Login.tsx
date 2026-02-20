@@ -9,7 +9,7 @@ const SignInForm: React.FC = () => {
     const [loading, setLoading] = useState(false);
     const { login } = useAuth();
 
-    const handleLogin = (e: React.FormEvent) => {
+    const handleLogin = async (e: React.FormEvent) => {
         e.preventDefault();
         setError('');
 
@@ -19,25 +19,18 @@ const SignInForm: React.FC = () => {
         }
 
         setLoading(true);
-
-        // Mock auth logic: Auto-detect role
-        setTimeout(() => {
-            const id = userId.toLowerCase().trim();
-            let detectedRole: 'agent' | 'supervisor' | null = null;
-
-            if (id.startsWith('a') && password === 'agent123') {
-                detectedRole = 'agent';
-            } else if ((id === 'admin' || id.startsWith('sup')) && password === 'sup123') {
-                detectedRole = 'supervisor';
-            }
-
-            if (detectedRole) {
-                login(id, detectedRole);
-            } else {
+        try {
+            await login(userId.trim(), password);
+        } catch (err: unknown) {
+            const msg = err instanceof Error ? err.message : 'Login failed';
+            if (msg === 'INVALID_CREDENTIALS' || msg === 'MISSING_CREDENTIALS') {
                 setError('Invalid credentials. Please try again.');
+            } else {
+                setError(`Error: ${msg}`);
             }
+        } finally {
             setLoading(false);
-        }, 800);
+        }
     };
 
     return (

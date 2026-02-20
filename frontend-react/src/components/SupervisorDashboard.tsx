@@ -3,7 +3,7 @@ import { useAuth } from '../context/AuthContext';
 import { useWebSocket } from '../context/SocketContext';
 import { fetchAgents, fetchSessions, fetchQueueStats, updateTicket, forceLogout, createTicket, fetchTickets } from '../api/agent';
 import type { Agent, AgentSession, QueueStats, Ticket } from '../api/types';
-import { Users, Phone, Clock, Activity, LogOut, Search, CheckCircle, Eye, ShieldOff, Plus, X } from 'lucide-react';
+import { Users, Phone, Clock, Activity, LogOut, Search, CheckCircle, Eye, ShieldOff, Plus, X, BarChart2, AlertTriangle, CheckCircle2, Coffee } from 'lucide-react';
 import Modal from './ui/Modal';
 
 const SupervisorDashboard: React.FC = () => {
@@ -109,6 +109,24 @@ const SupervisorDashboard: React.FC = () => {
         }
     }, [lastMessage]);
 
+    // Workstation derived stats (computed before render)
+    const wsOnBreakCount = sessions.filter(s => { const lb = s.breaks?.at(-1); return !s.clockOutTime && lb && !lb.breakOut; }).length;
+    const wsOnCallCount = sessions.filter(s => !s.clockOutTime && s.onCall).length;
+    const wsActiveCount = sessions.filter(s => !s.clockOutTime).length - wsOnBreakCount - wsOnCallCount;
+    const wsOfflineCount = agents.length - sessions.filter(s => !s.clockOutTime).length;
+    const wsResolvedCount = activity.filter(t => t.status === 'RESOLVED').length;
+    const wsRejectedCount = activity.filter(t => t.status === 'REJECTED').length;
+    const wsOpenCount = activity.filter(t => t.status === 'OPEN' || t.status === 'ASSIGNED').length;
+    const wsPendingCount = activity.filter(t => t.status === 'RESOLUTION_REQUESTED').length;
+    const wsResolutionRate = activity.length > 0 ? Math.round((wsResolvedCount / activity.length) * 100) : 0;
+    const wsKpis = [
+        { label: 'Total Agents', value: agents.length, icon: <Users size={20} />, color: '#facc15', bg: 'rgba(250,204,21,0.1)' },
+        { label: 'Active Now', value: wsActiveCount, icon: <Activity size={20} />, color: '#34d399', bg: 'rgba(52,211,153,0.1)' },
+        { label: 'On Break', value: wsOnBreakCount, icon: <Coffee size={20} />, color: '#fb923c', bg: 'rgba(251,146,60,0.1)' },
+        { label: 'Tickets Open', value: wsOpenCount + wsPendingCount, icon: <AlertTriangle size={20} />, color: '#f472b6', bg: 'rgba(244,114,182,0.1)' },
+        { label: 'AHT', value: currentAHT, icon: <Clock size={20} />, color: '#60a5fa', bg: 'rgba(96,165,250,0.1)' },
+    ];
+
     return (
         <div style={styles.dashboard}>
             {/* Header / Command Info */}
@@ -212,33 +230,43 @@ const SupervisorDashboard: React.FC = () => {
                     </div>
                 ) : view === 'MONITOR' ? (
                     <>
-                        <div style={styles.grid}>
-                            {agents
-                                .filter(a => {
-                                    const session = sessions.find(s => s.agentId === a.agentId);
-                                    const status = (!session || session.clockOutTime)
-                                        ? 'OFFLINE'
-                                        : (session.breaks && session.breaks.at(-1) && !session.breaks.at(-1).breakOut)
-                                            ? 'ON_BREAK'
-                                            : (session.onCall ? 'ON_CALL' : 'ACTIVE');
-                                    const matchesSearch = a.name.toUpperCase().includes(searchTerm) || a.agentId.toUpperCase().includes(searchTerm);
-                                    const matchesFilter = statusFilter === 'ALL' || status === statusFilter;
-                                    return matchesSearch && matchesFilter;
-                                })
-                                .map(agent => (
-                                    <AgentCard
-                                        key={agent.agentId}
-                                        agent={agent}
-                                        session={sessions.find(s => s.agentId === agent.agentId)}
-                                        onForceLogout={async (id) => {
-                                            if (confirm(`FORCE LOGOUT AGENT ${id}?`)) {
-                                                await forceLogout(id);
-                                            }
-                                        }}
-                                        onClick={() => setSelectedAgent(agent)}
-                                    />
-                                ))
-                            }
+                        <div style={styles.gridWrapper}>
+                            <div style={styles.grid}>
+                                {agents
+                                    .filter(a => {
+                                        const session = sessions.find(s => s.agentId === a.agentId);
+                                        const lastBreak = session?.breaks?.at(-1);
+                                        const status = (!session || session.clockOutTime)
+                                            ? 'OFFLINE'
+                                            : (lastBreak && !lastBreak.breakOut)
+                                                ? 'ON_BREAK'
+                                                : (session.onCall ? 'ON_CALL' : 'ACTIVE');
+                                        const matchesSearch = a.name.toUpperCase().includes(searchTerm) || a.agentId.toUpperCase().includes(searchTerm);
+                                        const matchesFilter = statusFilter === 'ALL' || status === statusFilter;
+                                        return matchesSearch && matchesFilter;
+                                    })
+                                    .map((agent, idx) => (
+                                        <AgentCard
+                                            key={agent.agentId}
+                                            agent={agent}
+                                            cardIndex={idx}
+                                            session={sessions.find(s => s.agentId === agent.agentId)}
+                                            onForceLogout={async (id) => {
+                                                if (confirm(`FORCE LOGOUT AGENT ${id}?`)) {
+                                                    await forceLogout(id);
+                                                    // Broadcast via WebSocket so the agent receives the logout signal immediately
+                                                    try {
+                                                        sendMessage({ type: 'FORCE_LOGOUT', agentId: id });
+                                                    } catch (e) {
+                                                        console.error('[Supervisor] Failed to broadcast FORCE_LOGOUT', e);
+                                                    }
+                                                }
+                                            }}
+                                            onClick={() => setSelectedAgent(agent)}
+                                        />
+                                    ))
+                                }
+                            </div>
                         </div>
 
                         {/* Redesigned Recent Tickets Section */}
@@ -411,29 +439,73 @@ const SupervisorDashboard: React.FC = () => {
                         </div>
                     </div>
                 ) : (
-                    <div style={styles.workstationGrid}>
-                        <div className="glass-card" style={styles.workstationCard}>
-                            <h3 style={styles.sectionTitle}>WorkStation Metrics</h3>
-                            <div style={styles.metricsGrid}>
-                                <div style={styles.metricItem}>
-                                    <span style={styles.metricLabel}>Total Agents</span>
-                                    <span style={styles.metricValue}>{agents.length}</span>
+                    <div style={styles.workstationShell}>
+                        {/* ── KPI Strip ── */}
+                        <div style={styles.kpiStrip}>
+                            {wsKpis.map((k, i) => (
+                                <div key={i} style={{ ...styles.kpiCard, borderColor: k.color + '55', background: k.bg }}>
+                                    <div style={{ ...styles.kpiIcon, color: k.color }}>{k.icon}</div>
+                                    <div style={styles.kpiBody}>
+                                        <span style={styles.kpiLabel}>{k.label}</span>
+                                        <span style={{ ...styles.kpiValue, color: k.color }}>{k.value}</span>
+                                    </div>
                                 </div>
-                                <div style={styles.metricItem}>
-                                    <span style={styles.metricLabel}>Active Agents</span>
-                                    <span style={styles.metricValue}>{sessions.filter(s => !s.clockOutTime).length}</span>
+                            ))}
+                        </div>
+
+                        {/* ── Bottom 2 cols ── */}
+                        <div style={styles.wsBotRow}>
+
+                            {/* Agent Status Breakdown */}
+                            <div className="glass-card" style={styles.wsPanel}>
+                                <div style={styles.wsPanelHeader}>
+                                    <div style={{ ...styles.sectionIndicator, background: '#34d399' }} />
+                                    <h3 style={styles.wsPanelTitle}>Agent Status Breakdown</h3>
                                 </div>
-                                <div style={styles.metricItem}>
-                                    <span style={styles.metricLabel}>Tickets Raised</span>
-                                    <span style={styles.metricValue}>{activity.length}</span>
+                                {[
+                                    { label: 'Active', count: wsActiveCount, total: agents.length, color: '#34d399' },
+                                    { label: 'On Call', count: wsOnCallCount, total: agents.length, color: '#60a5fa' },
+                                    { label: 'On Break', count: wsOnBreakCount, total: agents.length, color: '#fb923c' },
+                                    { label: 'Offline', count: wsOfflineCount, total: agents.length, color: 'var(--text-muted)' },
+                                ].map(row => (
+                                    <div key={row.label} style={styles.breakdownRow}>
+                                        <div style={styles.breakdownMeta}>
+                                            <span style={{ ...styles.breakdownDot, background: row.color }} />
+                                            <span style={styles.breakdownLabel}>{row.label}</span>
+                                            <span style={{ ...styles.breakdownCount, color: row.color }}>{row.count}</span>
+                                        </div>
+                                        <div style={styles.barTrack}>
+                                            <div style={{
+                                                ...styles.barFill,
+                                                width: `${row.total > 0 ? (row.count / row.total) * 100 : 0}%`,
+                                                background: row.color,
+                                                boxShadow: `0 0 8px ${row.color}88`,
+                                            }} />
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+
+                            {/* Ticket Analytics */}
+                            <div className="glass-card" style={styles.wsPanel}>
+                                <div style={styles.wsPanelHeader}>
+                                    <div style={{ ...styles.sectionIndicator, background: '#a78bfa' }} />
+                                    <h3 style={styles.wsPanelTitle}>Ticket Analytics</h3>
                                 </div>
-                                <div style={styles.metricItem}>
-                                    <span style={styles.metricLabel}>Tickets Resolved</span>
-                                    <span style={styles.metricValue}>{activity.filter(t => t.status === 'RESOLVED').length}</span>
-                                </div>
-                                <div style={styles.metricItem}>
-                                    <span style={styles.metricLabel}>AHT (Avg Handle Time)</span>
-                                    <span style={styles.metricValue}>{currentAHT}</span>
+                                <div style={styles.ticketStatGrid}>
+                                    {[
+                                        { label: 'Total Tickets', count: activity.length, color: '#facc15' },
+                                        { label: 'Total Resolved', count: wsResolvedCount, color: '#34d399' },
+                                        { label: 'Total Pending', count: wsPendingCount, color: '#fb923c' },
+                                        { label: 'Total Rejected', count: wsRejectedCount, color: '#ef4444' },
+                                        { label: 'Total Open', count: wsOpenCount, color: '#60a5fa' },
+                                        { label: 'Res. Rate', count: `${wsResolutionRate}%`, color: '#a78bfa' },
+                                    ].map(s => (
+                                        <div key={s.label} style={styles.ticketStatItem}>
+                                            <span style={{ ...styles.ticketStatNum, color: s.color }}>{s.count}</span>
+                                            <span style={styles.ticketStatLabel}>{s.label}</span>
+                                        </div>
+                                    ))}
                                 </div>
                             </div>
                         </div>
@@ -836,22 +908,52 @@ const StatCard: React.FC<{ icon: React.ReactNode, label: string, value: string |
     </div>
 );
 
+// Per-card gradient palettes — cycles through 8 distinct themes
+const CARD_GRADIENTS = [
+    { border: 'rgba(250,204,21,0.45)', glow: 'rgba(250,204,21,0.08)', accent: '#facc15' }, // yellow
+    { border: 'rgba(96,165,250,0.45)', glow: 'rgba(96,165,250,0.08)', accent: '#60a5fa' }, // blue
+    { border: 'rgba(167,139,250,0.45)', glow: 'rgba(167,139,250,0.08)', accent: '#a78bfa' }, // violet
+    { border: 'rgba(52,211,153,0.45)', glow: 'rgba(52,211,153,0.08)', accent: '#34d399' }, // emerald
+    { border: 'rgba(251,146,60,0.45)', glow: 'rgba(251,146,60,0.08)', accent: '#fb923c' }, // orange
+    { border: 'rgba(244,114,182,0.45)', glow: 'rgba(244,114,182,0.08)', accent: '#f472b6' }, // pink
+    { border: 'rgba(34,211,238,0.45)', glow: 'rgba(34,211,238,0.08)', accent: '#22d3ee' }, // cyan
+    { border: 'rgba(163,230,53,0.45)', glow: 'rgba(163,230,53,0.08)', accent: '#a3e635' }, // lime
+];
+
 const AgentCard: React.FC<{
     agent: Agent,
     session?: AgentSession,
+    cardIndex: number,
     onForceLogout: (id: string) => Promise<void>,
     onClick: () => void
-}> = ({ agent, session, onForceLogout, onClick }) => {
+}> = ({ agent, session, cardIndex, onForceLogout, onClick }) => {
     const status = deriveAgentStatus(session);
     const statusColor = status === 'OFFLINE' ? 'var(--text-muted)' :
         status === 'ON_CALL' ? 'var(--accent-blue)' :
             status === 'ON_BREAK' ? 'var(--accent-yellow)' : '#10b981';
 
+    const palette = CARD_GRADIENTS[cardIndex % CARD_GRADIENTS.length];
+
+    const cardStyle: React.CSSProperties = {
+        ...styles.agentCard,
+        border: `1px solid ${palette.border}`,
+        background: `linear-gradient(145deg, ${palette.glow} 0%, rgba(255,255,255,0.03) 100%)`,
+        boxShadow: `0 0 18px ${palette.glow}, inset 0 1px 0 rgba(255,255,255,0.06)`,
+        position: 'relative',
+        overflow: 'hidden',
+    };
+
     return (
-        <div className="glass-card" style={styles.agentCard} onClick={onClick}>
+        <div className="glass-card" style={cardStyle} onClick={onClick}>
+            {/* Subtle top accent stripe */}
+            <div style={{
+                position: 'absolute', top: 0, left: 0, right: 0, height: '3px',
+                background: `linear-gradient(90deg, transparent, ${palette.accent}, transparent)`,
+                opacity: 0.8,
+            }} />
             <div style={styles.agentHeader}>
                 <div style={styles.agentInfo}>
-                    <h3 style={styles.agentName}>{agent.name}</h3>
+                    <h3 style={{ ...styles.agentName, color: palette.accent }}>{agent.name}</h3>
                     <span style={styles.agentId}>{agent.agentId}</span>
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
@@ -867,12 +969,12 @@ const AgentCard: React.FC<{
                             <ShieldOff size={14} />
                         </button>
                     )}
-                    <div style={{ ...styles.statusDot, background: statusColor }} />
+                    <div style={{ ...styles.statusDot, background: statusColor, boxShadow: `0 0 8px ${statusColor}` }} />
                 </div>
             </div>
 
             <div style={styles.cardContent}>
-                <div style={styles.statusLabel}>
+                <div style={{ ...styles.statusLabel, color: statusColor }}>
                     <Clock size={14} style={{ marginRight: '4px' }} />
                     {status}
                 </div>
@@ -992,9 +1094,16 @@ const styles: Record<string, React.CSSProperties> = {
         fontWeight: '600',
         flex: 1,
     },
+    gridWrapper: {
+        maxHeight: 'calc(4 * 148px + 3 * 1rem)', // 4 rows × card height + gaps
+        overflowY: 'auto',
+        overflowX: 'hidden',
+        paddingRight: '4px',
+        scrollbarWidth: 'thin' as const,
+    },
     grid: {
         display: 'grid',
-        gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))',
+        gridTemplateColumns: 'repeat(4, 1fr)',
         gap: '1rem',
     },
     agentCard: {
@@ -1002,6 +1111,8 @@ const styles: Record<string, React.CSSProperties> = {
         display: 'flex',
         flexDirection: 'column',
         gap: '1rem',
+        cursor: 'pointer',
+        transition: 'transform 0.15s ease, box-shadow 0.15s ease',
     },
     agentHeader: {
         display: 'flex',
@@ -1328,45 +1439,140 @@ const styles: Record<string, React.CSSProperties> = {
         fontWeight: '700',
         cursor: 'pointer',
     },
-    workstationGrid: {
-        display: 'grid',
-        gridTemplateColumns: 'minmax(300px, 600px)',
-        gap: '1.5rem',
-        justifyContent: 'center',
-        marginTop: '1rem',
-    },
-    workstationCard: {
-        padding: '2rem',
+    workstationShell: {
         display: 'flex',
         flexDirection: 'column',
-        gap: '1.5rem',
+        gap: '1.25rem',
+        marginTop: '0.5rem',
     },
-    metricsGrid: {
+    kpiStrip: {
+        display: 'grid',
+        gridTemplateColumns: 'repeat(5, 1fr)',
+        gap: '1rem',
+    },
+    kpiCard: {
+        display: 'flex',
+        alignItems: 'center',
+        gap: '1rem',
+        padding: '1.25rem 1.5rem',
+        borderRadius: '14px',
+        border: '1px solid',
+        transition: 'transform 0.15s',
+    },
+    kpiIcon: {
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        width: '40px',
+        height: '40px',
+        borderRadius: '10px',
+        background: 'rgba(255,255,255,0.06)',
+        flexShrink: 0,
+    },
+    kpiBody: {
+        display: 'flex',
+        flexDirection: 'column',
+        gap: '2px',
+    },
+    kpiLabel: {
+        fontSize: '0.65rem',
+        fontWeight: '700',
+        color: 'var(--text-muted)',
+        textTransform: 'uppercase',
+        letterSpacing: '0.08em',
+    },
+    kpiValue: {
+        fontSize: '1.6rem',
+        fontWeight: '900',
+        lineHeight: 1,
+    },
+    wsBotRow: {
         display: 'grid',
         gridTemplateColumns: '1fr 1fr',
-        gap: '1.5rem',
+        gap: '1.25rem',
     },
-    metricItem: {
+    wsPanel: {
+        padding: '1.5rem',
         display: 'flex',
         flexDirection: 'column',
-        gap: '8px',
-        padding: '1.5rem',
-        background: 'var(--glass-bg)',
-        border: '1px solid var(--glass-border)',
-        borderRadius: '12px',
-        alignItems: 'center',
+        gap: '1.25rem',
     },
-    metricLabel: {
-        fontSize: '0.7rem',
+    wsPanelHeader: {
+        display: 'flex',
+        alignItems: 'center',
+        gap: '10px',
+        marginBottom: '0.25rem',
+    },
+    wsPanelTitle: {
+        fontSize: '0.85rem',
+        fontWeight: '800',
+        color: 'white',
+        textTransform: 'uppercase',
+        letterSpacing: '0.06em',
+    },
+    breakdownRow: {
+        display: 'flex',
+        flexDirection: 'column',
+        gap: '6px',
+    },
+    breakdownMeta: {
+        display: 'flex',
+        alignItems: 'center',
+        gap: '8px',
+    },
+    breakdownDot: {
+        width: '8px',
+        height: '8px',
+        borderRadius: '50%',
+        flexShrink: 0,
+    },
+    breakdownLabel: {
+        fontSize: '0.75rem',
+        color: 'var(--text-secondary)',
+        fontWeight: '600',
+    },
+    breakdownCount: {
+        fontSize: '0.75rem',
+        fontWeight: '800',
+        marginLeft: 'auto',
+    },
+    barTrack: {
+        height: '6px',
+        borderRadius: '999px',
+        background: 'rgba(255,255,255,0.07)',
+        overflow: 'hidden',
+    },
+    barFill: {
+        height: '100%',
+        borderRadius: '999px',
+        transition: 'width 0.6s ease',
+    },
+    ticketStatGrid: {
+        display: 'grid',
+        gridTemplateColumns: 'repeat(3, 1fr)',
+        gap: '1rem',
+        flex: 1,
+    },
+    ticketStatItem: {
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        background: 'rgba(255,255,255,0.04)',
+        borderRadius: '10px',
+        padding: '0.6rem 0.5rem',
+        border: '1px solid var(--glass-border)',
+    },
+    ticketStatNum: {
+        fontSize: '1.4rem',
+        fontWeight: '900',
+        lineHeight: 1,
+    },
+    ticketStatLabel: {
+        fontSize: '0.6rem',
         color: 'var(--text-muted)',
         fontWeight: '700',
         textTransform: 'uppercase',
-        letterSpacing: '0.1em',
-    },
-    metricValue: {
-        fontSize: '2rem',
-        fontWeight: '900',
-        color: 'white',
+        marginTop: '4px',
     },
     recentTicketsSection: {
         marginTop: '1.5rem',
