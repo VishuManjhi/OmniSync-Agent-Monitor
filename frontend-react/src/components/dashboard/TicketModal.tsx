@@ -89,6 +89,74 @@ export const TicketModal: React.FC<{
                             <span style={styles.detailLabel}>DESCRIPTION</span>
                             <p style={{ color: 'var(--text-secondary)', marginTop: '4px', lineHeight: '1.5' }}>{ticket.description}</p>
                         </div>
+                        {ticket.attachments && ticket.attachments.length > 0 && (
+                            <div style={styles.detailItem}>
+                                <span style={styles.detailLabel}>ATTACHMENTS ({ticket.attachments.length})</span>
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '8px' }}>
+                                    {ticket.attachments.map((att, idx) => (
+                                        <div key={att.attachmentId || idx} style={{
+                                            background: 'rgba(255,255,255,0.05)',
+                                            padding: '10px',
+                                            borderRadius: '8px',
+                                            border: '1px solid var(--glass-border)',
+                                            display: 'flex',
+                                            flexDirection: 'column',
+                                            gap: '8px'
+                                        }}>
+                                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                                <span style={{ fontSize: '0.8rem', fontWeight: '700', color: 'white', wordBreak: 'break-all' }}>{att.fileName}</span>
+                                                <span style={{ fontSize: '0.65rem', color: 'var(--text-muted)' }}>
+                                                    {(att.size / 1024).toFixed(1)} KB
+                                                </span>
+                                            </div>
+                                            {att.type.startsWith('image/') && att.content && (
+                                                <img
+                                                    src={`data:${att.type};base64,${att.content}`}
+                                                    alt={att.fileName}
+                                                    style={{
+                                                        maxHeight: '120px',
+                                                        maxWidth: '220px',
+                                                        objectFit: 'cover',
+                                                        borderRadius: '4px',
+                                                        border: '1px solid var(--glass-border)',
+                                                        cursor: 'zoom-in'
+                                                    }}
+                                                    onClick={() => {
+                                                        const win = window.open();
+                                                        win?.document.write(`
+                                                            <body style="margin:0;background:#000;display:flex;align-items:center;justify-content:center;height:100vh;">
+                                                                <img src="data:${att.type};base64,${att.content}" style="max-width:100%;max-height:100%;"/>
+                                                            </body>
+                                                        `);
+                                                    }}
+                                                />
+                                            )}
+                                            <button
+                                                onClick={() => {
+                                                    const link = document.createElement('a');
+                                                    link.href = `data:${att.type};base64,${att.content}`;
+                                                    link.download = att.fileName;
+                                                    link.click();
+                                                }}
+                                                style={{
+                                                    background: 'var(--accent-blue)',
+                                                    color: 'white',
+                                                    border: 'none',
+                                                    padding: '4px 12px',
+                                                    borderRadius: '4px',
+                                                    fontSize: '0.7rem',
+                                                    fontWeight: '700',
+                                                    cursor: 'pointer',
+                                                    width: 'fit-content'
+                                                }}
+                                            >
+                                                DOWNLOAD
+                                            </button>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+                        )}
                     </>
                 ) : (
                     <div style={styles.formGroup}>

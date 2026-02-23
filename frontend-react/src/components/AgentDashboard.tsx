@@ -94,7 +94,12 @@ const AgentDashboard: React.FC = () => {
         onSuccess: (_, variables) => {
             queryClient.invalidateQueries({ queryKey: ['tickets', user?.id] });
             try {
-                sendMessage({ type: 'TICKET_UPDATED', ticketId: variables.ticketId, updates: variables.updates });
+                sendMessage({
+                    type: 'TICKET_UPDATED',
+                    ticketId: variables.ticketId,
+                    updates: variables.updates,
+                    agentId: user?.id
+                });
             } catch (err) {
                 console.warn('Failed to send ticket updated websocket message', err);
             }
@@ -137,7 +142,17 @@ const AgentDashboard: React.FC = () => {
         return () => clearInterval(interval);
     }, [session]);
 
-    // WebSocket handling
+    // Session Monitoring Fallback: If we should be clocked in but the session 
+    // is missing from the backend (usually due to a missed force logout), logout.
+    useEffect(() => {
+        if (!isLoadingSession && user?.role === 'agent' && !session) {
+            // Check if we were previously clocked in (meaning we were expecting a session)
+            // Or just generally, if a clocked-in agent has no active session, they should be logged out.
+            // For now, any agent on this dashboard with no active session is considered force-logged out.
+            console.log('[Agent] No active session found. Force logging out...');
+            logout();
+        }
+    }, [session, isLoadingSession, user, logout]);
     useEffect(() => {
         if (!lastMessage) return;
 
@@ -146,7 +161,7 @@ const AgentDashboard: React.FC = () => {
             logout();
         }
 
-        if (lastMessage.type === 'ASSIGN_TICKET' && lastMessage.agentId === user?.id) {
+        if ((lastMessage.type === 'TICKET_CREATED' || lastMessage.type === 'TICKET_UPDATED') && lastMessage.agentId === user?.id) {
             queryClient.invalidateQueries({ queryKey: ['tickets', user?.id] });
         }
     }, [lastMessage, user, logout, queryClient]);
@@ -243,7 +258,7 @@ const AgentDashboard: React.FC = () => {
 
             // Notify via WebSocket
             try {
-                sendMessage({ type: 'TICKET_CREATED', ticket });
+                sendMessage({ type: 'TICKET_CREATED', ticket, agentId: user?.id });
             } catch (err) {
                 console.warn('Failed to send ticket created websocket message', err);
             }

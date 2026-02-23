@@ -216,7 +216,7 @@ app.post('/api/agents/:agentId/force-logout', async (req, res) => {
     const { agentId } = req.params;
     await Session.updateOne(
       { agentId, clockOutTime: null },
-      { $set: { forceLoggedOut: true } }
+      { $set: { forceLoggedOut: true, clockOutTime: Date.now() } }
     );
     res.json({ ok: true });
   } catch (err) {

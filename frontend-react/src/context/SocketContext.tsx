@@ -1,6 +1,8 @@
 import React, { createContext, useContext, useEffect, useState, useRef } from 'react';
 import { useAuth } from './AuthContext';
 import { io, Socket } from 'socket.io-client';
+import { getQueue, removeFromQueue } from '../api/indexedDB';
+import { forceLogout } from '../api/agent';
 
 interface WebSocketContextType {
     lastMessage: any;
@@ -16,6 +18,32 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     const [lastMessage, setLastMessage] = useState<any>(null);
     const socketRef = useRef<Socket | null>(null);
 
+    const syncOfflineQueue = async (socket: Socket) => {
+        try {
+            const queue = await getQueue();
+            if (queue.length === 0) return;
+
+            console.log(`[WS] Syncing ${queue.length} offline actions...`);
+
+            for (const action of queue) {
+                if (action.type === 'FORCE_LOGOUT') {
+                    try {
+                        await forceLogout(action.payload.agentId);
+                        // Also broadcast via WS so agents react immediately
+                        socket.emit('message', { type: 'FORCE_LOGOUT', agentId: action.payload.agentId });
+                        await removeFromQueue(action.id);
+                        console.log(`[WS] Offline sync success: FORCE_LOGOUT for ${action.payload.agentId}`);
+                    } catch (err) {
+                        console.error(`[WS] Offline sync failed for action ${action.id}:`, err);
+                    }
+                }
+                // Add more types here as needed
+            }
+        } catch (err) {
+            console.error('[WS] Error during offline sync:', err);
+        }
+    };
+
     useEffect(() => {
         if (!user) return;
 
@@ -29,6 +57,11 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({ chi
                 agentId: user.id,
                 role: user.role
             });
+
+            // Sync Offline Queue after a brief delay to allow other clients to reconnect
+            setTimeout(() => {
+                syncOfflineQueue(socket);
+            }, 1000);
         });
 
         socket.on('message', (data) => {

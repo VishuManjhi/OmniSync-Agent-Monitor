@@ -14,6 +14,7 @@ import { TicketModal } from './dashboard/TicketModal';
 import { CreateTicketModal } from './dashboard/CreateTicketModal';
 import { AgentDetailsModal } from './dashboard/AgentDetailsModal';
 import { deriveAgentStatus } from './dashboard/utils';
+import { addToQueue } from '../api/indexedDB';
 
 const SupervisorDashboard: React.FC = () => {
     const { logout, user } = useAuth();
@@ -59,8 +60,14 @@ const SupervisorDashboard: React.FC = () => {
     // Mutations
     const updateTicketMutation = useMutation({
         mutationFn: ({ ticketId, updates }: { ticketId: string, updates: Partial<Ticket> }) => updateTicket(ticketId, updates),
-        onSuccess: () => {
+        onSuccess: (_, variables) => {
             queryClient.invalidateQueries({ queryKey: ['all-tickets'] });
+            sendMessage({
+                type: 'TICKET_UPDATED',
+                ticketId: variables.ticketId,
+                updates: variables.updates,
+                agentId: selectedTicket?.agentId
+            });
             setSelectedTicket(null);
         }
     });
@@ -74,8 +81,9 @@ const SupervisorDashboard: React.FC = () => {
 
     const createTicketMutation = useMutation({
         mutationFn: createTicket,
-        onSuccess: () => {
+        onSuccess: (_, variables) => {
             queryClient.invalidateQueries({ queryKey: ['all-tickets'] });
+            sendMessage({ type: 'TICKET_CREATED', ticket: variables, agentId: variables.agentId });
             setShowCreateTicket(false);
         }
     });
@@ -96,8 +104,18 @@ const SupervisorDashboard: React.FC = () => {
         }
     }, [lastMessage, queryClient]);
 
-    const handleForceLogout = (agentId: string) => {
+    const handleForceLogout = async (agentId: string) => {
         if (window.confirm(`Force logout agent ${agentId}?`)) {
+            if (!navigator.onLine) {
+                try {
+                    await addToQueue({ type: 'FORCE_LOGOUT', payload: { agentId } });
+                    alert(`Offline: Force logout for ${agentId} queued for synchronization.`);
+                    return;
+                } catch (err) {
+                    console.error('Failed to queue offline action:', err);
+                }
+            }
+
             forceLogoutMutation.mutate(agentId);
             sendMessage({ type: 'FORCE_LOGOUT', agentId });
         }
