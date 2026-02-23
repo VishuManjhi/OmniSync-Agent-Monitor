@@ -2,7 +2,7 @@
   <h1 align="center">🟢 OmniSync Agent Monitor</h1>
   <p align="center">
     A real-time call-center agent monitoring and ticket management dashboard<br/>
-    built with <strong>React · TypeScript · Node.js · MongoDB · WebSockets</strong>
+    built with <strong>React · TypeScript · Node.js · MongoDB (Mongoose) · Socket.IO</strong>
   </p>
 </p>
 
@@ -11,8 +11,8 @@
   <img src="https://img.shields.io/badge/TypeScript-5.9-3178C6?style=flat-square&logo=typescript" />
   <img src="https://img.shields.io/badge/Vite-7-646CFF?style=flat-square&logo=vite" />
   <img src="https://img.shields.io/badge/Node.js-Express-339933?style=flat-square&logo=nodedotjs" />
-  <img src="https://img.shields.io/badge/MongoDB-6-47A248?style=flat-square&logo=mongodb" />
-  <img src="https://img.shields.io/badge/WebSocket-Live-yellow?style=flat-square" />
+  <img src="https://img.shields.io/badge/MongoDB-Mongoose-47A248?style=flat-square&logo=mongodb" />
+  <img src="https://img.shields.io/badge/Socket.IO-Live-white?style=flat-square&logo=socketdotio" />
 </p>
 
 ---
@@ -26,7 +26,6 @@
 - [Getting Started](#-getting-started)
 - [Project Structure](#-project-structure)
 - [API Endpoints](#-api-endpoints)
-- [Screenshots](#-screenshots)
 - [Author](#-author)
 
 ---
@@ -35,7 +34,7 @@
 
 **OmniSync Agent Monitor** (codename: *RestroBoard*) is a production-grade, real-time dashboard for monitoring call-center agents, managing support tickets, and tracking workforce performance — all in a sleek, dark-themed glassmorphism UI.
 
-It features **two role-based dashboards** (Supervisor & Agent), **live WebSocket communication**, **JWT authentication**, and a rich ticket lifecycle (create → assign → resolve / reject).
+It features **two role-based dashboards** (Supervisor & Agent), **live bidirectional communication**, **JWT authentication**, and a robust **Offline Action Queue** to ensure high availability.
 
 ---
 
@@ -44,30 +43,29 @@ It features **two role-based dashboards** (Supervisor & Agent), **live WebSocket
 ### 🖥️ Supervisor Dashboard
 | Feature | Description |
 |---|---|
-| **Live Monitor** | Real-time agent status grid (Active, On Call, On Break, Offline) with search & filter |
-| **Activity Log** | Sortable, filterable ticket table with priority detection (> 24h) |
-| **WorkStation** | Analytics hub — KPI strip, agent status breakdown bars, 3×2 ticket analytics grid |
-| **Ticket Management** | Create, assign, approve, and reject tickets with modal workflows |
-| **Force Logout** | Instantly log out an agent via API + WebSocket broadcast |
-| **Recent Tickets** | Scrollable card-based feed of the latest 10 tickets with quick actions |
+| **Live Monitor** | Real-time agent status grid (Active, On Call, On Break, Offline) |
+| **Activity Log** | Sortable ticket table with priority detection and status filtering |
+| **WorkStation** | Analytics hub — KPI strip, status breakdown bars, and a 3×2 ticket metrics grid |
+| **Ticket Management** | Approve/Reject tickets with **compact image previews** and zoom-in views |
+| **Offline Command Queue** | **Implemented via IndexedDB**: Force logout commands are locally queued if the supervisor is offline and automatically synced upon reconnect |
 
 ### 👤 Agent Dashboard
 | Feature | Description |
 |---|---|
-| **Clock In / Out** | Session tracking with one-click clock management |
-| **Break Management** | Start/end breaks with duration tracking |
-| **My Tickets** | View assigned tickets and request resolutions |
-| **Real-time Updates** | Instant ticket assignments & force-logout signals via WebSocket |
+| **Clock In / Out** | Precise session tracking with live duration timers |
+| **Break Management** | Start/end breaks with automatic activity status updates |
+| **My Tickets** | Personal feed with resolution request workflows and attachment support |
+| **Force Logout Protection** | Instant redirection to login if a session is terminated by a supervisor |
 
-### 🔐 Authentication
-- JWT-based login (`8h` token expiry)
-- Role-based routing — **Supervisor** vs **Agent** dashboards
-- Persistent session via `localStorage`
+### 🔐 Authentication & Security
+- **JWT + Passport**: Secure role-based resource protection
+- **bcrypt Hashing**: Passwords are automatically hashed and salted before storage
+- **Supervisor Fallback**: Robust validation for admin and fallback supervisor accounts
 
-### ⚡ Real-Time Communication
-- **WebSocket** — live agent state changes, ticket events, force-logout signals
-- Automatic reconnection with state sync on reconnect
-- Bi-directional message bus via shared `SocketContext`
+### ⚡ Real-Time & Offline First
+- **Socket.IO**: Switched from standard WS for better reconnection and event handling
+- **IndexedDB Actions**: Critical actions (like Force Logout) survive browser refreshes and connection drops
+- **Cache Invalidation**: React Query-powered state management for instant UI updates
 
 ---
 
@@ -75,106 +73,51 @@ It features **two role-based dashboards** (Supervisor & Agent), **live WebSocket
 
 | Layer | Technology |
 |---|---|
-| **Frontend** | React 19, TypeScript, Vite 7 |
-| **Styling** | CSS Variables, Glassmorphism, Lucide Icons |
-| **State** | React Context API (`AuthContext`, `SocketContext`) |
+| **Frontend** | React 19, TypeScript, Vite 7, React Query |
+| **Styling** | Vanilla CSS, Glassmorphism, Lucide Icons |
+| **State** | React Context API & TanStack Query |
 | **Backend** | Node.js, Express 4 |
-| **Database** | MongoDB 6 (via native driver) |
-| **Auth** | JSON Web Tokens (JWT) |
-| **Real-Time** | WebSocket (`ws` library) |
-| **Tooling** | ESLint, PostCSS, Tailwind (dev) |
-
----
-
-## 🏗 Architecture
-
-```
-┌──────────────────────────────────┐
-│         React Frontend           │
-│  (Vite Dev Server — port 5173)   │
-│                                  │
-│  ┌────────────┐  ┌─────────────┐ │
-│  │  Supervisor │  │    Agent    │ │
-│  │  Dashboard  │  │  Dashboard  │ │
-│  └──────┬──────┘  └──────┬──────┘ │
-│         │    AuthContext  │        │
-│         │  SocketContext  │        │
-└─────────┼────────────────┼────────┘
-          │  REST + WS     │
-          ▼                ▼
-┌──────────────────────────────────┐
-│       Node.js Backend            │
-│                                  │
-│  ┌──────────────┐ ┌────────────┐ │
-│  │  API Server  │ │  WS Server │ │
-│  │  (port 3003) │ │ (port 3004)│ │
-│  └──────┬───────┘ └────────────┘ │
-│         │                        │
-└─────────┼────────────────────────┘
-          ▼
-┌──────────────────────────────────┐
-│     MongoDB (restroDB)           │
-│  ┌─────────┬──────────┬────────┐ │
-│  │ agents  │ sessions │tickets │ │
-│  └─────────┴──────────┴────────┘ │
-└──────────────────────────────────┘
-```
+| **Database** | MongoDB (via **Mongoose ODM**) |
+| **Auth** | JWT (jsonwebtoken) & Passport.js |
+| **Real-Time** | **Socket.IO** |
 
 ---
 
 ## 🚀 Getting Started
 
 ### Prerequisites
-
 - **Node.js** ≥ 18
-- **MongoDB** (local or Atlas)
+- **MongoDB Atlas** or Local MongoDB
 - **npm** ≥ 9
 
-### 1. Clone the Repository
-
+### 1. Installation
 ```bash
 git clone https://github.com/VishuManjhi/OmniSync-Agent-Monitor.git
 cd OmniSync-Agent-Monitor
+npm install
+cd frontend-react && npm install && cd ..
 ```
 
-### 2. Install Dependencies
-
+### 2. Database Setup
 ```bash
-# Root (backend)
-npm install
-
-# Frontend
-cd frontend-react
-npm install
-cd ..
-```
-
-### 3. Seed the Database
-
-```bash
+# Seeds the DB with default users (Vishu, Rashi, Aryan, etc.)
 node backend/seed.js
 ```
 
-### 4. Start the Application
-
+### 3. Run
 ```bash
-# Terminal 1 — Backend (API + WebSocket servers)
+# Runs API Server (3003) and Socket Server (8080)
 npm run dev
 
-# Terminal 2 — Frontend
-cd frontend-react
-npm run dev
+# (In separate terminal)
+cd frontend-react && npm run dev
 ```
 
-| Service | URL |
-|---|---|
-| Frontend | `http://localhost:5173` |
-| API Server | `http://localhost:3003` |
-| WebSocket | `ws://localhost:3004` |
-
-### 5. Login
-
-Use credentials seeded into the database. Supervisor IDs start with `sup` or use `admin`.
+### ⚙️ Default Credentials
+| Role | ID | Password |
+|---|---|---|
+| **Agent** | `a1`, `a2`, `a3`, `a4` | `agent123` |
+| **Supervisor** | `admin`, `sup1` | `sup123` |
 
 ---
 
@@ -183,113 +126,31 @@ Use credentials seeded into the database. Supervisor IDs start with `sup` or use
 ```
 OmniSync-Agent-Monitor/
 ├── backend/
+│   ├── models/            # Mongoose Schemas (Agent, Ticket, Session)
 │   ├── servers/
-│   │   ├── api-server.js          # Express REST API (auth, agents, tickets, sessions)
-│   │   └── ws-server.js           # WebSocket broadcast server
-│   ├── db.js                      # MongoDB connection helper
-│   ├── seed.js                    # Database seeding script
-│   ├── create_priority_ticket.js  # Utility to create priority test tickets
-│   └── start-all.js              # Launches API + WS servers together
-│
+│   │   ├── api-server.js   # REST API (Passport protected)
+│   │   └── ws-server.js    # Socket.IO Event Hub
+│   ├── seed.js             # DB Seeding Script
+│   └── uploads/            # Multer storage for ticket attachments
 ├── frontend-react/
 │   ├── src/
 │   │   ├── api/
-│   │   │   ├── base.ts            # Axios-like fetch wrapper with JWT injection
-│   │   │   ├── agent.ts           # API service functions (agents, tickets, sessions)
-│   │   │   └── types.ts           # TypeScript interfaces (Agent, Ticket, Session, etc.)
-│   │   ├── components/
-│   │   │   ├── Login.tsx           # JWT login page with role-based redirect
-│   │   │   ├── SupervisorDashboard.tsx  # Full supervisor command center
-│   │   │   ├── AgentDashboard.tsx       # Agent workspace with clock/break/tickets
-│   │   │   └── ui/Modal.tsx        # Reusable modal component
+│   │   │   ├── indexedDB.ts # Offline action queue logic
+│   │   │   └── base.ts      # Fetch wrapper with interceptors
 │   │   ├── context/
-│   │   │   ├── AuthContext.tsx     # JWT auth state & login/logout logic
-│   │   │   └── SocketContext.tsx   # WebSocket connection & message bus
-│   │   ├── styles/                # Global CSS & theme variables
-│   │   ├── App.tsx                # Root router (auth-gated)
-│   │   └── main.tsx               # React entry point
-│   ├── index.html
-│   ├── vite.config.ts
-│   ├── tsconfig.json
-│   └── package.json
-│
-├── frontend/                      # Legacy vanilla JS frontend (deprecated)
-├── package.json                   # Root package (backend deps + scripts)
-└── README.md
+│   │   │   ├── AuthContext.tsx   # JWT handling
+│   │   │   └── SocketContext.tsx # Sync management & WS hooks
+│   │   └── components/
+│   │       ├── SupervisorDashboard.tsx
+│   │       └── AgentDashboard.tsx
 ```
 
 ---
 
-## 📡 API Endpoints
-
-All endpoints (except login & health) require a `Bearer` JWT token in the `Authorization` header.
-
-| Method | Endpoint | Description |
-|---|---|---|
-| `GET` | `/health` | Server health check |
-| `POST` | `/api/auth/login` | Authenticate & receive JWT |
-| `GET` | `/api/agents` | List all agents |
-| `GET` | `/api/agents/:agentId` | Get single agent |
-| `POST` | `/api/agent-sessions` | Create / update agent session |
-| `GET` | `/api/agent-sessions` | Get latest sessions (aggregated) |
-| `GET` | `/api/agents/:agentId/sessions/current` | Current session for an agent |
-| `POST` | `/api/agents/:agentId/force-logout` | Force logout an agent |
-| `POST` | `/api/tickets` | Create a new ticket |
-| `GET` | `/api/tickets` | List all tickets |
-| `PATCH` | `/api/tickets/:ticketId` | Update ticket (approve/reject) |
-| `GET` | `/api/agents/:agentId/tickets` | Tickets for a specific agent |
-| `GET` | `/api/queue-stats` | Real-time queue statistics |
-
-### WebSocket Events
-
-| Event | Direction | Description |
-|---|---|---|
-| `AGENT_STATUS_CHANGE` | Server → Client | Agent status update broadcast |
-| `FORCE_LOGOUT` | Client → Server → Client | Force logout signal |
-| `ASSIGN_TICKET` | Client → Server → Client | New ticket assignment |
-| `TICKET_*` | Server → Client | Ticket lifecycle events |
-
----
-
-## 📸 Screenshots
-
-> Screenshots are available in the `/screenshots` directory (when applicable).
-
-**Supervisor Dashboard — Live Monitor**
-- Real-time 4-column agent grid with status indicators
-- Search and filter by agent name or status
-
-**Supervisor Dashboard — WorkStation**
-- KPI strip (Total Agents, Active, On Break, Tickets Open, AHT)
-- Agent status breakdown with animated progress bars
-- 3×2 Ticket Analytics grid (Total, Resolved, Pending, Rejected, Open, Resolution Rate)
-
-**Agent Dashboard**
-- Clock in/out with live session timer
-- Break management with duration tracking
-- Personal ticket feed with resolution request workflow
-
----
-
-## 🧩 Design Philosophy
-
-- **Dark Glassmorphism UI** — premium feel with translucent cards, subtle borders, and glow effects
-- **Real-time First** — WebSocket-driven state with REST fallback for data fetching
-- **Role-Based Access** — clean separation of Supervisor and Agent experiences
-- **Component Architecture** — modular React components with inline styles for co-location
-- **Type Safety** — full TypeScript coverage on the frontend
-
----
-
 ## 👤 Author
-
 Built by **Vishuddhanand Manjhi**
-
 - GitHub: [@VishuManjhi](https://github.com/VishuManjhi)
 - Repository: [OmniSync-Agent-Monitor](https://github.com/VishuManjhi/OmniSync-Agent-Monitor)
 
 ---
-
-<p align="center">
-  <sub>⭐ Star this repo if you found it useful!</sub>
-</p>
+<p align="center"><sub>⭐ Star this repo if you found it useful!</sub></p>
