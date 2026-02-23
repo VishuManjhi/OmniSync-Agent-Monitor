@@ -4,6 +4,7 @@ export interface Agent {
     agentId: string;
     name: string;
     role: AgentRole;
+    forceLoggedOut?: boolean;
 }
 
 export interface Break {

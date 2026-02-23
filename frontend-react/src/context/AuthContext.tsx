@@ -11,7 +11,7 @@ interface User {
 
 interface AuthContextType {
     user: User | null;
-    login: (id: string, password: string) => Promise<void>;
+    login: (id: string, password: string) => Promise<User>;
     logout: () => void;
     isAuthenticated: boolean;
 }
@@ -45,7 +45,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         return token ? userFromToken(token) : null;
     });
 
-    const login = async (id: string, password: string): Promise<void> => {
+    const login = async (id: string, password: string): Promise<User> => {
         const res = await fetch(`${API_BASE}/api/auth/login`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -59,7 +59,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
         const { token } = await res.json();
         localStorage.setItem(TOKEN_KEY, token);
-        setUser(userFromToken(token)!);
+        const newUser = userFromToken(token)!;
+        setUser(newUser);
+        return newUser;
     };
 
     const logout = () => {

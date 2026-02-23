@@ -142,17 +142,16 @@ const AgentDashboard: React.FC = () => {
         return () => clearInterval(interval);
     }, [session]);
 
-    // Session Monitoring Fallback: If we should be clocked in but the session 
-    // is missing from the backend (usually due to a missed force logout), logout.
+    // Session Monitoring Fallback: Use the agent-level forceLoggedOut flag.
+    // This ensures that even if the WebSocket message is missed, the agent 
+    // will be logged out upon their next data refresh.
     useEffect(() => {
-        if (!isLoadingSession && user?.role === 'agent' && !session) {
-            // Check if we were previously clocked in (meaning we were expecting a session)
-            // Or just generally, if a clocked-in agent has no active session, they should be logged out.
-            // For now, any agent on this dashboard with no active session is considered force-logged out.
-            console.log('[Agent] No active session found. Force logging out...');
+        if (!isLoadingAgent && agent?.forceLoggedOut) {
+            console.log('[Agent] Detected force-logged out status on agent profile. Logging out...');
+            alert('You were force logged out by supervisor');
             logout();
         }
-    }, [session, isLoadingSession, user, logout]);
+    }, [agent, isLoadingAgent, logout]);
     useEffect(() => {
         if (!lastMessage) return;
 

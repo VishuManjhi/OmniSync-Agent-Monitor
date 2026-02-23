@@ -6,6 +6,7 @@ const agentSchema = new mongoose.Schema({
     name: { type: String, required: true },
     role: { type: String, enum: ['agent', 'supervisor'], default: 'agent' },
     password: { type: String }, // Hashed password
+    forceLoggedOut: { type: Boolean, default: false }
 }, { timestamps: true });
 
 // Hash password before saving

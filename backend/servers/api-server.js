@@ -55,14 +55,14 @@ connectDb().catch(err => {
   console.error('[API] Failed to connect to DB:', err);
 });
 
-// ── Authentication Protection Middleware ──────────────────────────
+// Authentication Protection Middleware
 const authenticateToken = passport.authenticate('jwt', { session: false });
 
 app.get('/health', (req, res) => {
   res.json({ status: 'ok' });
 });
 
-// ── Auth ────────────────────────────────────────────────────────────────
+// Auth 
 app.post('/api/auth/login', async (req, res) => {
   try {
     const { id, password } = req.body || {};
@@ -108,8 +108,13 @@ app.post('/api/auth/login', async (req, res) => {
       return res.status(401).json({ error: 'INVALID_CREDENTIALS' });
     }
 
-    const token = jwt.sign({ id: normalizedId, role }, JWT_SECRET, { expiresIn: JWT_EXPIRES });
-    res.json({ token, id: normalizedId, role });
+    const payload = { id: normalizedId, role: role };
+    const token = jwt.sign(payload, JWT_SECRET, { expiresIn: JWT_EXPIRES });
+
+    // Reset forceLoggedOut flag on successful login
+    await Agent.updateOne({ agentId: normalizedId }, { $set: { forceLoggedOut: false } });
+
+    res.json({ token, id: normalizedId, role, user: payload });
   } catch (err) {
     console.error('[API] POST /api/auth/login failed:', err);
     res.status(500).json({ error: 'INTERNAL_ERROR', details: err.message });
@@ -118,7 +123,7 @@ app.post('/api/auth/login', async (req, res) => {
 
 app.use('/api', authenticateToken);
 
-// ── File Upload ────────────────────────────────────────────────────────
+// File Upload
 app.post('/api/upload', upload.single('file'), (req, res) => {
   try {
     if (!req.file) {
@@ -174,6 +179,12 @@ app.post('/api/agent-sessions', async (req, res) => {
       { upsert: true }
     );
 
+    // Reset forceLoggedOut flag when agent clocks in/updates session
+    await Agent.updateOne(
+      { agentId: sessionData.agentId },
+      { $set: { forceLoggedOut: false } }
+    );
+
     res.status(200).json({ ok: true });
   } catch (err) {
     console.error('[API] POST /api/agent-sessions failed', err);
@@ -216,7 +227,12 @@ app.post('/api/agents/:agentId/force-logout', async (req, res) => {
     const { agentId } = req.params;
     await Session.updateOne(
       { agentId, clockOutTime: null },
-      { $set: { forceLoggedOut: true, clockOutTime: Date.now() } }
+      { $set: { forceLoggedOutAt: Date.now(), clockOutTime: Date.now() } }
+    );
+    // Set flag on agent document for fallback detection
+    await Agent.updateOne(
+      { agentId },
+      { $set: { forceLoggedOut: true } }
     );
     res.json({ ok: true });
   } catch (err) {

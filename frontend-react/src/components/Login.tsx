@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { User, Lock } from 'lucide-react';
 
@@ -8,6 +9,7 @@ const SignInForm: React.FC = () => {
     const [error, setError] = useState('');
     const [loading, setLoading] = useState(false);
     const { login } = useAuth();
+    const navigate = useNavigate();
 
     const handleLogin = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -20,7 +22,9 @@ const SignInForm: React.FC = () => {
 
         setLoading(true);
         try {
-            await login(userId.trim(), password);
+            const user = await login(userId.trim(), password);
+            // Programmatically navigate based on role
+            navigate(user.role === 'supervisor' ? '/supervisor' : '/agent');
         } catch (err: unknown) {
             const msg = err instanceof Error ? err.message : 'Login failed';
             if (msg === 'INVALID_CREDENTIALS' || msg === 'MISSING_CREDENTIALS') {
