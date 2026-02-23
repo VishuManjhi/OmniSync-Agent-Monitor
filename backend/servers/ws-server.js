@@ -1,29 +1,42 @@
-import { WebSocketServer } from 'ws';
+import { Server } from 'socket.io';
+import http from 'http';
 
-const wss = new WebSocketServer({ port: 8080 });
+const server = http.createServer();
+const io = new Server(server, {
+    cors: {
+        origin: '*', // Adjust for production
+        methods: ['GET', 'POST']
+    }
+});
 
-console.log('[WS] WebSocket Server listening on port 8080');
+const PORT = 8080;
 
-wss.on('connection', (ws) => {
-    console.log('[WS] New connection');
+io.on('connection', (socket) => {
+    console.log('[WS] New connection:', socket.id);
 
-    ws.on('message', (message) => {
-        try {
-            const data = JSON.parse(message);
-            console.log('[WS] Received:', data.type);
+    socket.on('identify', (data) => {
+        console.log(`[WS] Agent identified: ${data.agentId} (${data.role})`);
+        socket.data.agentId = data.agentId;
+        socket.data.role = data.role;
 
-            // Broadcast to all clients
-            wss.clients.forEach((client) => {
-                if (client.readyState === 1) { // 1 is OPEN
-                    client.send(JSON.stringify(data));
-                }
-            });
-        } catch (err) {
-            console.error('[WS] Error processing message:', err);
+        // Join a room based on agentId for targeted broadcasts if needed
+        socket.join(`agent:${data.agentId}`);
+        if (data.role === 'supervisor') {
+            socket.join('supervisors');
         }
     });
 
-    ws.on('close', () => {
-        console.log('[WS] Connection closed');
+    socket.on('message', (data) => {
+        console.log('[WS] Received message:', data.type);
+        // Broadcast to ALL connected clients (mirroring old 'ws' logic)
+        io.emit('message', data);
     });
+
+    socket.on('disconnect', () => {
+        console.log('[WS] Connection closed:', socket.id);
+    });
+});
+
+server.listen(PORT, () => {
+    console.log(`[WS] Socket.io Server listening on port ${PORT}`);
 });

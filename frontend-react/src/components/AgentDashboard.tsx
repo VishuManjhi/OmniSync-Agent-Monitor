@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { useWebSocket } from '../context/SocketContext';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
     saveAgentSession,
     fetchCurrentSession,
@@ -9,7 +10,7 @@ import {
     updateTicket,
     fetchAgent
 } from '../api/agent';
-import type { Ticket, AgentSession, Agent } from '../api/types';
+import type { Ticket, AgentSession } from '../api/types';
 import {
     Clock,
     Play,
@@ -28,11 +29,8 @@ import {
 const AgentDashboard: React.FC = () => {
     const { user, logout } = useAuth();
     const { lastMessage, sendMessage } = useWebSocket();
+    const queryClient = useQueryClient();
 
-    const [agent, setAgent] = useState<Agent | null>(null);
-    const [session, setSession] = useState<AgentSession | null>(null);
-    const [tickets, setTickets] = useState<Ticket[]>([]);
-    const [loading, setLoading] = useState(true);
     const [breakTime, setBreakTime] = useState(0); // seconds
     const [shiftTime, setShiftTime] = useState(0); // seconds
 
@@ -41,38 +39,79 @@ const AgentDashboard: React.FC = () => {
     const [description, setDescription] = useState('');
     const [callDuration, setCallDuration] = useState('');
     const [attachment, setAttachment] = useState<File | null>(null);
-    const [submitting, setSubmitting] = useState(false);
 
-    useEffect(() => {
-        if (!user?.id) return;
+    // Queries
+    const { data: agent, isLoading: isLoadingAgent } = useQuery({
+        queryKey: ['agent', user?.id],
+        queryFn: () => fetchAgent(user!.id),
+        enabled: !!user?.id
+    });
 
-        const loadData = async () => {
+    const { data: session, isLoading: isLoadingSession } = useQuery({
+        queryKey: ['session', user?.id],
+        queryFn: () => fetchCurrentSession(user!.id).catch(() => null),
+        enabled: !!user?.id
+    });
+
+    const { data: tickets = [], isLoading: isLoadingTickets } = useQuery({
+        queryKey: ['tickets', user?.id],
+        queryFn: () => fetchAgentTickets(user!.id),
+        enabled: !!user?.id
+    });
+
+    const loading = isLoadingAgent || isLoadingSession || isLoadingTickets;
+
+    // Mutations
+    const sessionMutation = useMutation({
+        mutationFn: saveAgentSession,
+        onSuccess: (_, variables) => {
+            queryClient.invalidateQueries({ queryKey: ['session', user?.id] });
+            sendMessage({
+                type: 'AGENT_STATUS_CHANGE',
+                agentId: user!.id,
+                status: deriveStatus(variables as AgentSession).toLowerCase(),
+                session: variables
+            });
+        }
+    });
+
+    const ticketMutation = useMutation({
+        mutationFn: createTicket,
+        onSuccess: () => {
+            queryClient.invalidateQueries({ queryKey: ['tickets', user?.id] });
+            // Reset form
+            setIssueType('');
+            setDescription('');
+            setCallDuration('');
+            setAttachment(null);
+            alert('Ticket submitted successfully');
+        }
+    });
+
+    const updateTicketMutation = useMutation({
+        mutationFn: ({ ticketId, updates }: { ticketId: string, updates: Partial<Ticket> }) =>
+            updateTicket(ticketId, updates),
+        onSuccess: (_, variables) => {
+            queryClient.invalidateQueries({ queryKey: ['tickets', user?.id] });
             try {
-                const [agentData, sessionData, ticketsData] = await Promise.all([
-                    fetchAgent(user.id),
-                    fetchCurrentSession(user.id).catch(() => null),
-                    fetchAgentTickets(user.id)
-                ]);
-                setAgent(agentData);
-                setSession(sessionData);
-                setTickets(ticketsData);
-
-                // Broadcast initial status
-                sendMessage({
-                    type: 'AGENT_STATUS',
-                    agentId: user.id,
-                    status: deriveStatus(sessionData).toLowerCase(),
-                    session: sessionData
-                });
+                sendMessage({ type: 'TICKET_UPDATED', ticketId: variables.ticketId, updates: variables.updates });
             } catch (err) {
-                console.error('Failed to load agent dashboard data', err);
-            } finally {
-                setLoading(false);
+                console.warn('Failed to send ticket updated websocket message', err);
             }
-        };
+        }
+    });
 
-        loadData();
-    }, [user?.id]);
+    // Broadcast initial status on mount/load
+    useEffect(() => {
+        if (!loading && user?.id) {
+            sendMessage({
+                type: 'AGENT_STATUS',
+                agentId: user.id,
+                status: deriveStatus(session || null).toLowerCase(),
+                session: session || null
+            });
+        }
+    }, [loading, user?.id]);
 
     // Timers logic
     useEffect(() => {
@@ -108,9 +147,9 @@ const AgentDashboard: React.FC = () => {
         }
 
         if (lastMessage.type === 'ASSIGN_TICKET' && lastMessage.agentId === user?.id) {
-            if (user?.id) fetchAgentTickets(user.id).then(setTickets);
+            queryClient.invalidateQueries({ queryKey: ['tickets', user?.id] });
         }
-    }, [lastMessage, user, logout]);
+    }, [lastMessage, user, logout, queryClient]);
 
     const formatTime = (seconds: number) => {
         const h = Math.floor(seconds / 3600);
@@ -128,7 +167,7 @@ const AgentDashboard: React.FC = () => {
     };
 
     const handleClockIn = async () => {
-        if (!user || session) return;
+        if (!user || (session && !session.clockOutTime)) return;
         const newSession: Partial<AgentSession> = {
             sessionID: crypto.randomUUID(),
             agentId: user.id,
@@ -137,27 +176,13 @@ const AgentDashboard: React.FC = () => {
             breaks: [],
             onCall: false
         };
-        await saveAgentSession(newSession);
-        setSession(newSession as AgentSession);
-        sendMessage({
-            type: 'AGENT_STATUS_CHANGE',
-            agentId: user.id,
-            status: 'active',
-            session: newSession
-        });
+        sessionMutation.mutate(newSession);
     };
 
     const handleClockOut = async () => {
         if (!session || !user) return;
         const updated = { ...session, clockOutTime: Date.now() };
-        await saveAgentSession(updated);
-        setSession(null);
-        sendMessage({
-            type: 'AGENT_STATUS_CHANGE',
-            agentId: user.id,
-            status: 'offline',
-            session: updated
-        });
+        sessionMutation.mutate(updated);
     };
 
     const handleBreakToggle = async () => {
@@ -172,34 +197,19 @@ const AgentDashboard: React.FC = () => {
             updated.breaks.push({ breakIn: Date.now(), breakOut: null });
         }
 
-        await saveAgentSession(updated);
-        setSession(updated);
-        sendMessage({
-            type: 'AGENT_STATUS_CHANGE',
-            agentId: user.id,
-            status: deriveStatus(updated).toLowerCase(),
-            session: updated
-        });
+        sessionMutation.mutate(updated);
     };
 
     const handleOnCallToggle = async () => {
         if (!session || !user) return;
         const updated = { ...session, onCall: !session.onCall };
-        await saveAgentSession(updated);
-        setSession(updated);
-        sendMessage({
-            type: 'AGENT_STATUS_CHANGE',
-            agentId: user.id,
-            status: deriveStatus(updated).toLowerCase(),
-            session: updated
-        });
+        sessionMutation.mutate(updated);
     };
 
     const handleTicketSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
         if (!user || !issueType || !description) return;
 
-        setSubmitting(true);
         try {
             const ticket: Partial<Ticket> = {
                 ticketId: crypto.randomUUID(),
@@ -229,75 +239,49 @@ const AgentDashboard: React.FC = () => {
                 });
             }
 
-            await createTicket(ticket);
+            ticketMutation.mutate(ticket);
 
-            // Notify other clients via WebSocket so supervisors refresh
+            // Notify via WebSocket
             try {
-                sendMessage({ type: 'ticket:created', ticket });
+                sendMessage({ type: 'TICKET_CREATED', ticket });
             } catch (err) {
                 console.warn('Failed to send ticket created websocket message', err);
             }
-
-            // Reset form
-            setIssueType('');
-            setDescription('');
-            setCallDuration('');
-            setAttachment(null);
-
-            // Refresh tickets
-            const freshTickets = await fetchAgentTickets(user.id);
-            setTickets(freshTickets);
-            alert('Ticket submitted successfully');
         } catch (err) {
             console.error('Failed to submit ticket', err);
             alert('Submission failed');
-        } finally {
-            setSubmitting(false);
         }
     };
 
     const handleTicketUpdate = async (ticketId: string, status: Ticket['status']) => {
         if (!user || !session) return;
 
-        try {
-            const local = tickets.find(t => t.ticketId === ticketId);
-            const updates: Partial<Ticket> = {};
+        const local = tickets.find(t => t.ticketId === ticketId);
+        const updates: Partial<Ticket> = {};
 
-            if (status === 'IN_PROGRESS') {
-                updates.status = 'IN_PROGRESS';
-                updates.startedAt = Date.now();
-            } else if (status === 'RESOLUTION_REQUESTED') {
-                // If ticket has no creator recorded, or creator is current agent, resolve directly
-                const canResolveDirectly = !local?.createdBy || local?.createdBy === user.id;
-                if (canResolveDirectly) {
-                    updates.status = 'RESOLVED';
-                    updates.resolvedAt = Date.now();
-                } else {
-                    updates.status = 'RESOLUTION_REQUESTED';
-                    updates.resolutionRequestedAt = Date.now();
-                }
-            } else if (status === 'RESOLVED') {
+        if (status === 'IN_PROGRESS') {
+            updates.status = 'IN_PROGRESS';
+            updates.startedAt = Date.now();
+        } else if (status === 'RESOLUTION_REQUESTED') {
+            const canResolveDirectly = !local?.createdBy || local?.createdBy === user.id;
+            if (canResolveDirectly) {
                 updates.status = 'RESOLVED';
                 updates.resolvedAt = Date.now();
+            } else {
+                updates.status = 'RESOLUTION_REQUESTED';
+                updates.resolutionRequestedAt = Date.now();
             }
-
-            await updateTicket(ticketId, updates);
-            // notify supervisors/others of ticket update
-            try {
-                sendMessage({ type: 'ticket:updated', ticketId, updates });
-            } catch (err) {
-                console.warn('Failed to send ticket updated websocket message', err);
-            }
-            const freshTickets = await fetchAgentTickets(user.id);
-            setTickets(freshTickets);
-        } catch (err) {
-            console.error('Failed to update ticket', err);
+        } else if (status === 'RESOLVED') {
+            updates.status = 'RESOLVED';
+            updates.resolvedAt = Date.now();
         }
+
+        updateTicketMutation.mutate({ ticketId, updates });
     };
 
     if (loading) return <div style={styles.loading}>Initializing Workspace...</div>;
 
-    const currentStatus = deriveStatus(session);
+    const currentStatus = deriveStatus(session || null);
 
     return (
         <div style={styles.container}>
@@ -436,8 +420,8 @@ const AgentDashboard: React.FC = () => {
                                 </div>
                             </div>
 
-                            <button type="submit" style={styles.submitBtn} disabled={submitting || currentStatus === 'OFFLINE'}>
-                                <Send size={16} /> {submitting ? 'Raising Ticket...' : 'Submit Document'}
+                            <button type="submit" style={styles.submitBtn} disabled={ticketMutation.isPending || currentStatus === 'OFFLINE'}>
+                                <Send size={16} /> {ticketMutation.isPending ? 'Raising Ticket...' : 'Submit Document'}
                             </button>
                         </form>
                     </div>
@@ -478,17 +462,14 @@ const AgentDashboard: React.FC = () => {
                                                 Start Resolution
                                             </button>
                                         )}
-                                        {t.status === 'IN_PROGRESS' && (() => {
-                                            const canResolveDirectly = !t.createdBy || t.createdBy === user?.id;
-                                            return (
-                                                <button
-                                                    onClick={() => handleTicketUpdate(t.ticketId, 'RESOLUTION_REQUESTED')}
-                                                    style={{ ...styles.actionBtn, borderColor: 'var(--accent-yellow)', color: 'var(--accent-yellow)' }}
-                                                >
-                                                    {canResolveDirectly ? 'Resolve' : 'Request Resolution'}
-                                                </button>
-                                            );
-                                        })()}
+                                        {t.status === 'IN_PROGRESS' && (
+                                            <button
+                                                onClick={() => handleTicketUpdate(t.ticketId, 'RESOLUTION_REQUESTED')}
+                                                style={{ ...styles.actionBtn, borderColor: 'var(--accent-yellow)', color: 'var(--accent-yellow)' }}
+                                            >
+                                                {!t.createdBy || t.createdBy === user?.id ? 'Resolve' : 'Request Resolution'}
+                                            </button>
+                                        )}
                                         {t.status === 'RESOLUTION_REQUESTED' && (
                                             <div style={styles.awaitingBadge}>
                                                 <AlertCircle size={14} /> Awaiting Approval

@@ -1,19 +1,25 @@
 import React, { useEffect, useState } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { useWebSocket } from '../context/SocketContext';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { fetchAgents, fetchSessions, fetchQueueStats, updateTicket, forceLogout, createTicket, fetchTickets } from '../api/agent';
-import type { Agent, AgentSession, QueueStats, Ticket } from '../api/types';
-import { Users, Phone, Clock, Activity, LogOut, Search, CheckCircle, Eye, ShieldOff, Plus, X, BarChart2, AlertTriangle, CheckCircle2, Coffee } from 'lucide-react';
-import Modal from './ui/Modal';
+import type { Agent, Ticket } from '../api/types';
+import { Users, Phone, Clock, Activity, LogOut, Search, Eye, Plus, AlertTriangle, Coffee } from 'lucide-react';
+
+// Modular Components
+import { styles } from './dashboard/dashboardStyles';
+import { StatCard } from './dashboard/StatCard';
+import { AgentCard } from './dashboard/AgentCard';
+import { TicketModal } from './dashboard/TicketModal';
+import { CreateTicketModal } from './dashboard/CreateTicketModal';
+import { AgentDetailsModal } from './dashboard/AgentDetailsModal';
+import { deriveAgentStatus } from './dashboard/utils';
 
 const SupervisorDashboard: React.FC = () => {
     const { logout, user } = useAuth();
     const { lastMessage, sendMessage } = useWebSocket();
+    const queryClient = useQueryClient();
 
-    const [agents, setAgents] = useState<Agent[]>([]);
-    const [sessions, setSessions] = useState<AgentSession[]>([]);
-    const [stats, setStats] = useState<QueueStats | null>(null);
-    const [activity, setActivity] = useState<Ticket[]>([]);
     const [selectedTicket, setSelectedTicket] = useState<Ticket | null>(null);
     const [selectedAgent, setSelectedAgent] = useState<Agent | null>(null);
     const [showCreateTicket, setShowCreateTicket] = useState(false);
@@ -22,95 +28,85 @@ const SupervisorDashboard: React.FC = () => {
     const [view, setView] = useState<'MONITOR' | 'ACTIVITY' | 'WORKSTATION'>('MONITOR');
     const [activityFilter, setActivityFilter] = useState('ALL');
 
-    const resolvedTickets = activity.filter(t => t.status === 'RESOLVED' && t.startedAt && t.resolvedAt);
-    const totalAHTMs = resolvedTickets.reduce((acc, t) => acc + (t.resolvedAt! - t.startedAt!), 0);
-    const avgAHTMs = resolvedTickets.length > 0 ? totalAHTMs / resolvedTickets.length : 0;
+    // Queries
+    const { data: agents = [], isLoading: isLoadingAgents } = useQuery({
+        queryKey: ['agents'],
+        queryFn: fetchAgents,
+        enabled: !!user?.id
+    });
 
-    const formatAHT = (ms: number) => {
-        if (ms === 0) return '—';
-        const totalSecs = Math.floor(ms / 1000);
-        const m = Math.floor(totalSecs / 60);
-        const s = totalSecs % 60;
-        return `${m}m ${s}s`;
-    };
+    const { data: sessions = [], isLoading: isLoadingSessions } = useQuery({
+        queryKey: ['sessions'],
+        queryFn: fetchSessions,
+        enabled: !!user?.id
+    });
 
-    const currentAHT = formatAHT(avgAHTMs);
+    const { data: stats, isLoading: isLoadingStats } = useQuery({
+        queryKey: ['queue-stats'],
+        queryFn: fetchQueueStats,
+        enabled: !!user?.id,
+        refetchInterval: 10000 // Refresh every 10s
+    });
 
-    const [loading, setLoading] = useState(true);
-    const [loadError, setLoadError] = useState<string | null>(null);
+    const { data: activity = [], isLoading: isLoadingActivity } = useQuery({
+        queryKey: ['all-tickets'],
+        queryFn: fetchTickets,
+        enabled: !!user?.id
+    });
 
-    const loadInitialData = async () => {
-        setLoading(true);
-        setLoadError(null);
-        try {
-            const [agentsData, sessionsData, statsData, activityData] = await Promise.all([
-                fetchAgents(),
-                fetchSessions(),
-                fetchQueueStats(),
-                fetchTickets()
-            ]);
-            setAgents(agentsData);
-            setSessions(sessionsData);
-            setStats(statsData);
-            setActivity(activityData);
-        } catch (err: any) {
-            console.error('Failed to load dashboard data', err);
-            setLoadError(err?.message ?? String(err));
-        } finally {
-            setLoading(false);
+    const loading = isLoadingAgents || isLoadingSessions || isLoadingStats || isLoadingActivity;
+
+    // Mutations
+    const updateTicketMutation = useMutation({
+        mutationFn: ({ ticketId, updates }: { ticketId: string, updates: Partial<Ticket> }) => updateTicket(ticketId, updates),
+        onSuccess: () => {
+            queryClient.invalidateQueries({ queryKey: ['all-tickets'] });
+            setSelectedTicket(null);
         }
-    };
+    });
 
+    const forceLogoutMutation = useMutation({
+        mutationFn: forceLogout,
+        onSuccess: () => {
+            queryClient.invalidateQueries({ queryKey: ['sessions'] });
+        }
+    });
+
+    const createTicketMutation = useMutation({
+        mutationFn: createTicket,
+        onSuccess: () => {
+            queryClient.invalidateQueries({ queryKey: ['all-tickets'] });
+            setShowCreateTicket(false);
+        }
+    });
+
+    // WebSocket Handling
     useEffect(() => {
-        if (!user?.id) return;
-        loadInitialData();
-    }, [user?.id]);
-
-    // Listen for real-time WebSocket updates
-    useEffect(() => {
-        if (!lastMessage) return;
-
-        if (lastMessage.type === 'AGENT_STATUS_CHANGE' || lastMessage.type === 'AGENT_STATUS') {
-            const { session } = lastMessage;
-
-            // Comprehensive refresh to ensure SLA and other counts update too
-            fetchSessions().then(setSessions);
-            fetchQueueStats().then(setStats);
-
-            if (session) {
-                setSessions(prev => {
-                    const index = prev.findIndex(s => s.agentId === session.agentId);
-                    if (index !== -1) {
-                        const newSessions = [...prev];
-                        newSessions[index] = session;
-                        return newSessions;
-                    }
-                    return [...prev, session];
-                });
+        if (lastMessage) {
+            const data = lastMessage; // SocketContext already provides the object
+            if (data.type === 'AGENT_STATUS_CHANGE' || data.type === 'FORCE_LOGOUT') {
+                queryClient.invalidateQueries({ queryKey: ['sessions'] });
+            }
+            if (data.type === 'TICKET_UPDATED' || data.type === 'TICKET_CREATED') {
+                queryClient.invalidateQueries({ queryKey: ['all-tickets'] });
+            }
+            if (data.type === 'AGENT_STATUS_CHANGE' || data.type === 'TICKET_CREATED') {
+                queryClient.invalidateQueries({ queryKey: ['queue-stats'] });
             }
         }
+    }, [lastMessage, queryClient]);
 
-        if (lastMessage.type === 'stats_update') {
-            setStats(lastMessage.stats);
+    const handleForceLogout = (agentId: string) => {
+        if (window.confirm(`Force logout agent ${agentId}?`)) {
+            forceLogoutMutation.mutate(agentId);
+            sendMessage({ type: 'FORCE_LOGOUT', agentId });
         }
+    };
 
-        // Ticket events (created/updated/deleted) are broadcast via WebSocket by other clients
-        try {
-            const t = String(lastMessage.type || '').toLowerCase();
-            if (t.includes('ticket')) {
-                // refetch tickets to keep UI in sync
-                fetchTickets().then((data) => {
-                    setActivity(data);
-                    console.log('[Supervisor] refreshed tickets after ws event', lastMessage.type);
-                }).catch(err => console.error('[Supervisor] failed to reload tickets', err));
-            }
-        } catch (err) {
-            // ignore
-        }
-    }, [lastMessage]);
+    // Derived Statistics
+    const currentAHT = stats?.avgHandleTime ? `${Math.floor(stats.avgHandleTime / 60)}:${(stats.avgHandleTime % 60).toString().padStart(2, '0')}` : '0:00';
 
-    // Workstation derived stats (computed before render)
-    const wsOnBreakCount = sessions.filter(s => { const lb = s.breaks?.at(-1); return !s.clockOutTime && lb && !lb.breakOut; }).length;
+    const wsOnBreakCount = sessions.filter(s => !s.clockOutTime && s.breaks?.some(b => !b.breakOut)).length;
     const wsOnCallCount = sessions.filter(s => !s.clockOutTime && s.onCall).length;
     const wsActiveCount = sessions.filter(s => !s.clockOutTime).length - wsOnBreakCount - wsOnCallCount;
     const wsOfflineCount = agents.length - sessions.filter(s => !s.clockOutTime).length;
@@ -119,6 +115,7 @@ const SupervisorDashboard: React.FC = () => {
     const wsOpenCount = activity.filter(t => t.status === 'OPEN' || t.status === 'ASSIGNED').length;
     const wsPendingCount = activity.filter(t => t.status === 'RESOLUTION_REQUESTED').length;
     const wsResolutionRate = activity.length > 0 ? Math.round((wsResolvedCount / activity.length) * 100) : 0;
+
     const wsKpis = [
         { label: 'Total Agents', value: agents.length, icon: <Users size={20} />, color: '#facc15', bg: 'rgba(250,204,21,0.1)' },
         { label: 'Active Now', value: wsActiveCount, icon: <Activity size={20} />, color: '#34d399', bg: 'rgba(52,211,153,0.1)' },
@@ -126,6 +123,10 @@ const SupervisorDashboard: React.FC = () => {
         { label: 'Tickets Open', value: wsOpenCount + wsPendingCount, icon: <AlertTriangle size={20} />, color: '#f472b6', bg: 'rgba(244,114,182,0.1)' },
         { label: 'AHT', value: currentAHT, icon: <Clock size={20} />, color: '#60a5fa', bg: 'rgba(96,165,250,0.1)' },
     ];
+
+    if (loading && !stats) {
+        return <div style={{ color: 'white', padding: '2rem' }}>LOADING BOOT SEQUENCE...</div>;
+    }
 
     return (
         <div style={styles.dashboard}>
@@ -216,31 +217,14 @@ const SupervisorDashboard: React.FC = () => {
                     </button>
                 </div>
 
-                {loading ? (
-                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '60vh', flexDirection: 'column' }}>
-                        <div style={{ fontSize: '1rem', color: 'var(--text-muted)', marginBottom: '12px' }}>Loading dashboard...</div>
-                    </div>
-                ) : loadError ? (
-                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '60vh', flexDirection: 'column', gap: '8px' }}>
-                        <div style={{ color: 'var(--accent-red)', fontWeight: 700 }}>Failed to load data</div>
-                        <div style={{ color: 'var(--text-muted)' }}>{loadError}</div>
-                        <div style={{ display: 'flex', gap: '8px', marginTop: '8px' }}>
-                            <button onClick={loadInitialData} style={styles.createBtn}>Retry</button>
-                        </div>
-                    </div>
-                ) : view === 'MONITOR' ? (
+                {view === 'MONITOR' ? (
                     <>
                         <div style={styles.gridWrapper}>
                             <div style={styles.grid}>
                                 {agents
                                     .filter(a => {
                                         const session = sessions.find(s => s.agentId === a.agentId);
-                                        const lastBreak = session?.breaks?.at(-1);
-                                        const status = (!session || session.clockOutTime)
-                                            ? 'OFFLINE'
-                                            : (lastBreak && !lastBreak.breakOut)
-                                                ? 'ON_BREAK'
-                                                : (session.onCall ? 'ON_CALL' : 'ACTIVE');
+                                        const status = deriveAgentStatus(session);
                                         const matchesSearch = a.name.toUpperCase().includes(searchTerm) || a.agentId.toUpperCase().includes(searchTerm);
                                         const matchesFilter = statusFilter === 'ALL' || status === statusFilter;
                                         return matchesSearch && matchesFilter;
@@ -251,17 +235,7 @@ const SupervisorDashboard: React.FC = () => {
                                             agent={agent}
                                             cardIndex={idx}
                                             session={sessions.find(s => s.agentId === agent.agentId)}
-                                            onForceLogout={async (id) => {
-                                                if (confirm(`FORCE LOGOUT AGENT ${id}?`)) {
-                                                    await forceLogout(id);
-                                                    // Broadcast via WebSocket so the agent receives the logout signal immediately
-                                                    try {
-                                                        sendMessage({ type: 'FORCE_LOGOUT', agentId: id });
-                                                    } catch (e) {
-                                                        console.error('[Supervisor] Failed to broadcast FORCE_LOGOUT', e);
-                                                    }
-                                                }
-                                            }}
+                                            onForceLogout={handleForceLogout}
                                             onClick={() => setSelectedAgent(agent)}
                                         />
                                     ))
@@ -269,7 +243,7 @@ const SupervisorDashboard: React.FC = () => {
                             </div>
                         </div>
 
-                        {/* Redesigned Recent Tickets Section */}
+                        {/* Recent Tickets Section */}
                         <div className="glass-card" style={styles.recentTicketsSection}>
                             <div style={styles.sectionHeader}>
                                 <div style={styles.sectionIndicator} />
@@ -382,7 +356,6 @@ const SupervisorDashboard: React.FC = () => {
                                                 ticket.agentId.toUpperCase().includes(search) ||
                                                 (agent && agent.name.toUpperCase().includes(search));
 
-                                            // Priority Logic: > 24 hours (86400000 ms)
                                             const isPriority = (Date.now() - ticket.issueDateTime) > 86400000 && ticket.status !== 'RESOLVED' && ticket.status !== 'REJECTED';
 
                                             let matchesFilter = true;
@@ -455,7 +428,6 @@ const SupervisorDashboard: React.FC = () => {
 
                         {/* ── Bottom 2 cols ── */}
                         <div style={styles.wsBotRow}>
-
                             {/* Agent Status Breakdown */}
                             <div className="glass-card" style={styles.wsPanel}>
                                 <div style={styles.wsPanelHeader}>
@@ -517,17 +489,14 @@ const SupervisorDashboard: React.FC = () => {
                 <TicketModal
                     ticket={selectedTicket}
                     onClose={() => setSelectedTicket(null)}
-                    onUpdate={async (updates: Partial<Ticket>) => {
-                        await updateTicket(selectedTicket.ticketId, updates);
-                        setActivity(prev => prev.map(t => t.ticketId === selectedTicket.ticketId ? { ...t, ...updates } : t));
-                        setSelectedTicket(null);
+                    onUpdate={(updates: Partial<Ticket>) => {
+                        updateTicketMutation.mutate({ ticketId: selectedTicket.ticketId, updates });
                     }}
-                    onReject={async (reason: string) => {
+                    onReject={(reason: string) => {
                         const updates = { status: 'REJECTED' as const, rejectionReason: reason, rejectedAt: Date.now() };
-                        await updateTicket(selectedTicket.ticketId, updates);
-                        setActivity(prev => prev.map(t => t.ticketId === selectedTicket.ticketId ? { ...t, ...updates } : t));
-                        setSelectedTicket(null);
+                        updateTicketMutation.mutate({ ticketId: selectedTicket.ticketId, updates });
                     }}
+                    isLoading={updateTicketMutation.isPending}
                 />
             )}
 
@@ -535,32 +504,18 @@ const SupervisorDashboard: React.FC = () => {
                 <CreateTicketModal
                     agents={agents}
                     onClose={() => setShowCreateTicket(false)}
-                    onSubmit={async (ticketData) => {
-                        const newTicket = {
+                    onSubmit={(ticketData) => {
+                        const newTicket: Partial<Ticket> = {
                             ...ticketData,
                             ticketId: `TICK-${Date.now()}`,
                             issueDateTime: Date.now(),
-                            status: ticketData.agentId ? 'ASSIGNED' : 'OPEN',
+                            status: (ticketData.agentId ? 'ASSIGNED' : 'OPEN') as Ticket['status'],
                             createdBy: user?.id,
                             attachments: []
                         };
-                        await createTicket(newTicket);
-
-                        // Broadcast assignment via WebSocket
-                        if (newTicket.agentId) {
-                            try {
-                                sendMessage({
-                                    type: 'ASSIGN_TICKET',
-                                    agentId: newTicket.agentId,
-                                    ticket: newTicket
-                                });
-                            } catch (e) { console.error('WS Error broadcasting assignment', e); }
-                        }
-
-                        setShowCreateTicket(false);
-                        const updatedTickets = await fetchTickets();
-                        setActivity(updatedTickets);
+                        createTicketMutation.mutate(newTicket);
                     }}
+                    isLoading={createTicketMutation.isPending}
                 />
             )}
 
@@ -573,1110 +528,6 @@ const SupervisorDashboard: React.FC = () => {
             )}
         </div>
     );
-};
-
-const TicketModal: React.FC<{
-    ticket: Ticket,
-    onClose: () => void,
-    onUpdate: (updates: Partial<Ticket>) => Promise<void>,
-    onReject: (reason: string) => Promise<void>
-}> = ({ ticket, onClose, onUpdate, onReject }) => {
-    const [loading, setLoading] = useState(false);
-    const [isRejecting, setIsRejecting] = useState(false);
-    const [rejectionReason, setRejectionReason] = useState('');
-
-    const handleApprove = async () => {
-        setLoading(true);
-        try {
-            await onUpdate({ status: 'RESOLVED', resolvedAt: Date.now() });
-        } catch (err) {
-            console.error('Approve failed', err);
-            alert('Failed to approve ticket');
-        } finally {
-            setLoading(false);
-        }
-    };
-
-    const handleRejectSubmit = async () => {
-        if (!rejectionReason.trim()) return;
-        setLoading(true);
-        try {
-            await onReject(rejectionReason);
-        } catch (err) {
-            console.error('Reject failed', err);
-            alert('Failed to reject ticket');
-        } finally {
-            setLoading(false);
-        }
-    };
-
-    const footer = (
-        <div className="flex gap-3" style={{ width: '100%', justifyContent: 'flex-end', paddingTop: '1rem', borderTop: '1px solid var(--glass-border)' }}>
-            {!isRejecting ? (
-                <>
-                    {(ticket.status === 'RESOLUTION_REQUESTED' || ticket.status === 'OPEN') && (
-                        <>
-                            <button
-                                style={{ ...styles.resolveBtn, cursor: loading ? 'not-allowed' : 'pointer' }}
-                                onClick={handleApprove}
-                                disabled={loading}
-                            >
-                                <CheckCircle size={16} /> APPROVE
-                            </button>
-                            <button
-                                style={{ ...styles.rejectBtn, cursor: loading ? 'not-allowed' : 'pointer' }}
-                                onClick={() => setIsRejecting(true)}
-                                disabled={loading}
-                            >
-                                <X size={16} /> REJECT
-                            </button>
-                        </>
-                    )}
-                    <button style={styles.closeBtn} onClick={onClose}>CLOSE</button>
-                </>
-            ) : (
-                <>
-                    <button
-                        style={{ ...styles.rejectBtn, background: '#ef4444', color: 'white', cursor: loading ? 'not-allowed' : 'pointer' }}
-                        onClick={handleRejectSubmit}
-                        disabled={loading || !rejectionReason.trim()}
-                    >
-                        CONFIRM REJECTION
-                    </button>
-                    <button
-                        style={styles.closeBtn}
-                        onClick={() => { setIsRejecting(false); setRejectionReason(''); }}
-                        disabled={loading}
-                    >
-                        CANCEL
-                    </button>
-                </>
-            )}
-        </div>
-    );
-
-    return (
-        <Modal open={true} onOpenChange={(v) => { if (!v && !loading) onClose(); }} title={isRejecting ? "REJECT TICKET" : "TICKET DETAILS"} footer={footer}>
-            <div className="space-y-3 text-sm">
-                {!isRejecting ? (
-                    <>
-                        <div style={styles.detailItem}>
-                            <span style={styles.detailLabel}>TICKET ID</span>
-                            <span style={styles.detailValue}>{ticket.ticketId}</span>
-                        </div>
-                        <div style={styles.detailItem}>
-                            <span style={styles.detailLabel}>AGENT</span>
-                            <span style={styles.detailValue}>{ticket.agentId}</span>
-                        </div>
-                        <div style={styles.detailItem}>
-                            <span style={styles.detailLabel}>STATUS</span>
-                            <span style={{ ...styles.statusBadge, width: 'fit-content', fontSize: '0.8rem' }}>{ticket.status}</span>
-                        </div>
-                        <div style={styles.detailItem}>
-                            <span style={styles.detailLabel}>DESCRIPTION</span>
-                            <p style={{ color: 'var(--text-secondary)', marginTop: '4px', lineHeight: '1.5' }}>{ticket.description}</p>
-                        </div>
-                    </>
-                ) : (
-                    <div style={styles.formGroup}>
-                        <label style={styles.label}>REASON FOR REJECTION</label>
-                        <textarea
-                            style={{ ...styles.input, height: '120px', resize: 'none' }}
-                            placeholder="Please provide a reason for rejecting this resolution request..."
-                            value={rejectionReason}
-                            onChange={(e) => setRejectionReason(e.target.value)}
-                            autoFocus
-                        />
-                    </div>
-                )}
-            </div>
-        </Modal>
-    );
-};
-
-
-
-// ... TicketModal ...
-
-const CreateTicketModal: React.FC<{
-    agents: Agent[],
-    onClose: () => void,
-    onSubmit: (data: any) => Promise<void>
-}> = ({ agents, onClose, onSubmit }) => {
-    const [form, setForm] = useState({ agentId: '', issueType: '', description: '' });
-    const [searchTerm, setSearchTerm] = useState('');
-    const [isDropdownOpen, setIsDropdownOpen] = useState(false);
-
-    const filteredAgents = agents.filter(a =>
-        a.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        a.agentId.toLowerCase().includes(searchTerm.toLowerCase())
-    );
-
-    const handleAgentSelect = (agent: Agent) => {
-        setForm({ ...form, agentId: agent.agentId });
-        setSearchTerm(`${agent.name} (${agent.agentId})`);
-        setIsDropdownOpen(false);
-    };
-
-    return (
-        <div style={styles.modalOverlay}>
-            <div className="glass-card" style={styles.modal}>
-                <div style={styles.modalHeader}>
-                    <h3 style={styles.modalTitle}>CREATE TICKET</h3>
-                    <button onClick={onClose} style={styles.iconBtn}><X size={20} /></button>
-                </div>
-                <div style={styles.modalContent}>
-                    <div style={styles.formGroup}>
-                        <label style={styles.label}>ASSIGN TO AGENT</label>
-                        <div style={{ position: 'relative' }}>
-                            <div style={styles.inputWrapper}>
-                                <Search size={16} style={{ position: 'absolute', left: '12px', color: 'var(--text-muted)' }} />
-                                <input
-                                    style={{ ...styles.input, paddingLeft: '36px' }}
-                                    placeholder="Search Agent..."
-                                    value={searchTerm}
-                                    onChange={(e) => {
-                                        setSearchTerm(e.target.value);
-                                        setIsDropdownOpen(true);
-                                        if (e.target.value === '') setForm({ ...form, agentId: '' });
-                                    }}
-                                    onFocus={() => setIsDropdownOpen(true)}
-                                />
-                                {form.agentId && (
-                                    <button
-                                        onClick={() => { setForm({ ...form, agentId: '' }); setSearchTerm(''); }}
-                                        style={{ position: 'absolute', right: '12px', background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer' }}
-                                    >
-                                        <X size={14} />
-                                    </button>
-                                )}
-                            </div>
-
-                            {isDropdownOpen && (
-                                <div style={{
-                                    position: 'absolute',
-                                    top: '100%',
-                                    left: 0,
-                                    right: 0,
-                                    maxHeight: '200px',
-                                    overflowY: 'auto',
-                                    background: '#0a0a0a',
-                                    border: '1px solid var(--glass-border)',
-                                    borderRadius: '8px',
-                                    marginTop: '4px',
-                                    zIndex: 100,
-                                    boxShadow: '0 4px 20px rgba(0,0,0,0.5)'
-                                }}>
-                                    <div
-                                        style={{ padding: '8px 12px', cursor: 'pointer', borderBottom: '1px solid var(--glass-border)', fontSize: '0.85rem' }}
-                                        onClick={() => {
-                                            setForm({ ...form, agentId: '' });
-                                            setSearchTerm('');
-                                            setIsDropdownOpen(false);
-                                        }}
-                                    >
-                                        <span style={{ color: 'var(--text-muted)' }}>UNASSIGNED</span>
-                                    </div>
-                                    {filteredAgents.map(a => (
-                                        <div
-                                            key={a.agentId}
-                                            style={{
-                                                padding: '8px 12px',
-                                                cursor: 'pointer',
-                                                borderBottom: '1px solid rgba(255,255,255,0.05)',
-                                                display: 'flex',
-                                                justifyContent: 'space-between',
-                                                alignItems: 'center',
-                                                background: form.agentId === a.agentId ? 'rgba(250, 204, 21, 0.1)' : 'transparent'
-                                            }}
-                                            onClick={() => handleAgentSelect(a)}
-                                        >
-                                            <span style={{ fontSize: '0.9rem', fontWeight: '500' }}>{a.name}</span>
-                                            <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>{a.agentId}</span>
-                                        </div>
-                                    ))}
-                                    {filteredAgents.length === 0 && (
-                                        <div style={{ padding: '12px', color: 'var(--text-muted)', fontSize: '0.8rem', textAlign: 'center' }}>
-                                            No agents found
-                                        </div>
-                                    )}
-                                </div>
-                            )}
-                        </div>
-                    </div>
-                    <div style={styles.formGroup}>
-                        <label style={styles.label}>ISSUE TYPE</label>
-                        <input
-                            style={styles.input}
-                            placeholder="e.g. SYSTEM SLOWNESS"
-                            value={form.issueType}
-                            onChange={(e) => setForm({ ...form, issueType: e.target.value })}
-                        />
-                    </div>
-                    <div style={styles.formGroup}>
-                        <label style={styles.label}>DESCRIPTION</label>
-                        <textarea
-                            style={{ ...styles.input, height: '100px', resize: 'none' }}
-                            placeholder="DESCRIBE THE ISSUE..."
-                            value={form.description}
-                            onChange={(e) => setForm({ ...form, description: e.target.value })}
-                        />
-                    </div>
-                    <button
-                        style={styles.submitBtn}
-                        onClick={() => onSubmit(form)}
-                    >
-                        CREATE TICKET
-                    </button>
-                </div>
-            </div>
-        </div>
-    );
-};
-
-const AgentDetailsModal: React.FC<{
-    agent: Agent,
-    session?: AgentSession,
-    onClose: () => void
-}> = ({ agent, session, onClose }) => {
-    return (
-        <div style={styles.modalOverlay}>
-            <div className="glass-card" style={{ ...styles.modal, maxWidth: '600px' }}>
-                <div style={styles.modalHeader}>
-                    <div style={styles.agentDetailHeader}>
-                        <h3 style={styles.modalTitle}>{agent.name}</h3>
-                        <span style={styles.agentIdTag}>{agent.agentId}</span>
-                    </div>
-                    <button onClick={onClose} style={styles.iconBtn}><X size={20} /></button>
-                </div>
-                <div style={styles.modalContent}>
-                    <div style={styles.detailGrid}>
-                        <div style={styles.detailItem}>
-                            <span style={styles.detailLabel}>STATUS</span>
-                            <span style={styles.detailValue}>{deriveAgentStatus(session)}</span>
-                        </div>
-                        <div style={styles.detailItem}>
-                            <span style={styles.detailLabel}>CLOCKED IN</span>
-                            <span style={styles.detailValue}>{session?.clockInTime ? new Date(session.clockInTime).toLocaleTimeString() : '—'}</span>
-                        </div>
-                        <div style={styles.detailItem}>
-                            <span style={styles.detailLabel}>CLOCKED OUT</span>
-                            <span style={styles.detailValue}>{session?.clockOutTime ? new Date(session.clockOutTime).toLocaleTimeString() : '—'}</span>
-                        </div>
-                    </div>
-
-                    <div style={styles.sectionDivider}>BREAK HISTORY</div>
-                    <div style={styles.breakTimeline}>
-                        {session?.breaks && session.breaks.length > 0 ? (
-                            session.breaks.map((b, i) => (
-                                <div key={i} style={styles.timelineItem}>
-                                    <div style={styles.timelinePoint} />
-                                    <div style={styles.timelineContent}>
-                                        <span style={styles.timelineTime}>
-                                            {new Date(b.breakIn).toLocaleTimeString()} —
-                                            {b.breakOut ? new Date(b.breakOut).toLocaleTimeString() : 'ONGOING'}
-                                        </span>
-                                        <span style={styles.timelineLabel}>BREAK SESSION</span>
-                                    </div>
-                                </div>
-                            ))
-                        ) : (
-                            <div style={styles.emptyText}>NO BREAK DATA AVAILABLE</div>
-                        )}
-                    </div>
-                </div>
-            </div>
-        </div>
-    );
-};
-
-const deriveAgentStatus = (session?: AgentSession) => {
-    if (!session || session.clockOutTime) return 'OFFLINE';
-    const lastBreak = session.breaks?.at(-1);
-    if (lastBreak && !lastBreak.breakOut) return 'ON_BREAK';
-    if (session.onCall) return 'ON_CALL';
-    return 'ACTIVE';
-};
-
-const StatCard: React.FC<{ icon: React.ReactNode, label: string, value: string | number }> = ({ icon, label, value }) => (
-    <div style={styles.statCard}>
-        <div style={styles.statIcon}>{icon}</div>
-        <div style={styles.statInfo}>
-            <span style={styles.statLabel}>{label}</span>
-            <span style={styles.statValue}>{value}</span>
-        </div>
-    </div>
-);
-
-// Per-card gradient palettes — cycles through 8 distinct themes
-const CARD_GRADIENTS = [
-    { border: 'rgba(250,204,21,0.45)', glow: 'rgba(250,204,21,0.08)', accent: '#facc15' }, // yellow
-    { border: 'rgba(96,165,250,0.45)', glow: 'rgba(96,165,250,0.08)', accent: '#60a5fa' }, // blue
-    { border: 'rgba(167,139,250,0.45)', glow: 'rgba(167,139,250,0.08)', accent: '#a78bfa' }, // violet
-    { border: 'rgba(52,211,153,0.45)', glow: 'rgba(52,211,153,0.08)', accent: '#34d399' }, // emerald
-    { border: 'rgba(251,146,60,0.45)', glow: 'rgba(251,146,60,0.08)', accent: '#fb923c' }, // orange
-    { border: 'rgba(244,114,182,0.45)', glow: 'rgba(244,114,182,0.08)', accent: '#f472b6' }, // pink
-    { border: 'rgba(34,211,238,0.45)', glow: 'rgba(34,211,238,0.08)', accent: '#22d3ee' }, // cyan
-    { border: 'rgba(163,230,53,0.45)', glow: 'rgba(163,230,53,0.08)', accent: '#a3e635' }, // lime
-];
-
-const AgentCard: React.FC<{
-    agent: Agent,
-    session?: AgentSession,
-    cardIndex: number,
-    onForceLogout: (id: string) => Promise<void>,
-    onClick: () => void
-}> = ({ agent, session, cardIndex, onForceLogout, onClick }) => {
-    const status = deriveAgentStatus(session);
-    const statusColor = status === 'OFFLINE' ? 'var(--text-muted)' :
-        status === 'ON_CALL' ? 'var(--accent-blue)' :
-            status === 'ON_BREAK' ? 'var(--accent-yellow)' : '#10b981';
-
-    const palette = CARD_GRADIENTS[cardIndex % CARD_GRADIENTS.length];
-
-    const cardStyle: React.CSSProperties = {
-        ...styles.agentCard,
-        border: `1px solid ${palette.border}`,
-        background: `linear-gradient(145deg, ${palette.glow} 0%, rgba(255,255,255,0.03) 100%)`,
-        boxShadow: `0 0 18px ${palette.glow}, inset 0 1px 0 rgba(255,255,255,0.06)`,
-        position: 'relative',
-        overflow: 'hidden',
-    };
-
-    return (
-        <div className="glass-card" style={cardStyle} onClick={onClick}>
-            {/* Subtle top accent stripe */}
-            <div style={{
-                position: 'absolute', top: 0, left: 0, right: 0, height: '3px',
-                background: `linear-gradient(90deg, transparent, ${palette.accent}, transparent)`,
-                opacity: 0.8,
-            }} />
-            <div style={styles.agentHeader}>
-                <div style={styles.agentInfo}>
-                    <h3 style={{ ...styles.agentName, color: palette.accent }}>{agent.name}</h3>
-                    <span style={styles.agentId}>{agent.agentId}</span>
-                </div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    {status !== 'OFFLINE' && (
-                        <button
-                            onClick={(e) => {
-                                e.stopPropagation();
-                                onForceLogout(agent.agentId);
-                            }}
-                            style={styles.forceBtn}
-                            title="Force Logout"
-                        >
-                            <ShieldOff size={14} />
-                        </button>
-                    )}
-                    <div style={{ ...styles.statusDot, background: statusColor, boxShadow: `0 0 8px ${statusColor}` }} />
-                </div>
-            </div>
-
-            <div style={styles.cardContent}>
-                <div style={{ ...styles.statusLabel, color: statusColor }}>
-                    <Clock size={14} style={{ marginRight: '4px' }} />
-                    {status}
-                </div>
-                {status === 'OFFLINE' && session?.clockOutTime && (
-                    <div style={{ ...styles.statusLabel, marginTop: '4px', fontSize: '0.7rem', color: 'var(--text-muted)' }}>
-                        Out: {new Date(session.clockOutTime).toLocaleTimeString()}
-                    </div>
-                )}
-            </div>
-        </div>
-    );
-};
-
-const styles: Record<string, React.CSSProperties> = {
-    dashboard: {
-        minHeight: '100vh',
-        display: 'flex',
-        flexDirection: 'column',
-        padding: '1.5rem',
-        maxWidth: '1440px',
-        margin: '0 auto',
-        gap: '1.5rem',
-    },
-    header: {
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        padding: '1rem 0',
-    },
-    logoGroup: {
-        display: 'flex',
-        flexDirection: 'column',
-        gap: '4px',
-    },
-    logo: {
-        fontSize: '1.5rem',
-        fontWeight: '900',
-        color: 'var(--accent-yellow)',
-        letterSpacing: '-0.02em',
-        textTransform: 'uppercase',
-    },
-    badge: {
-        fontSize: '0.6rem',
-        background: 'rgba(250, 204, 21, 0.1)',
-        color: 'var(--accent-yellow)',
-        padding: '2px 8px',
-        borderRadius: '4px',
-        letterSpacing: '0.1em',
-        fontWeight: '700',
-        width: 'fit-content',
-    },
-    statsRow: {
-        display: 'flex',
-        gap: '2rem',
-    },
-    statCard: {
-        display: 'flex',
-        alignItems: 'center',
-        gap: '1rem',
-    },
-    statInfo: {
-        display: 'flex',
-        flexDirection: 'column',
-    },
-    statLabel: {
-        fontSize: '0.65rem',
-        color: 'var(--text-muted)',
-        textTransform: 'uppercase',
-        letterSpacing: '0.1em',
-        fontWeight: '700',
-    },
-    statValue: {
-        fontSize: '1.25rem',
-        fontWeight: '800',
-        color: 'white',
-    },
-    logoutBtn: {
-        background: 'transparent',
-        border: '1px solid var(--glass-border)',
-        color: 'var(--text-primary)',
-        padding: '0.5rem 1rem',
-        borderRadius: '8px',
-        display: 'flex',
-        alignItems: 'center',
-        gap: '8px',
-        fontSize: '0.8rem',
-        fontWeight: '600',
-    },
-    main: {
-        flex: 1,
-        display: 'flex',
-        flexDirection: 'column',
-        gap: '1rem',
-    },
-    controlBar: {
-        display: 'flex',
-        justifyContent: 'space-between',
-        alignItems: 'center',
-    },
-    searchBox: {
-        position: 'relative',
-        display: 'flex',
-        alignItems: 'center',
-        background: 'var(--bg-card)',
-        border: '1px solid var(--glass-border)',
-        borderRadius: '10px',
-        padding: '0 12px',
-        width: '300px',
-    },
-    searchInput: {
-        background: 'transparent',
-        border: 'none',
-        padding: '10px',
-        color: 'white',
-        outline: 'none',
-        fontSize: '0.8rem',
-        fontWeight: '600',
-        flex: 1,
-    },
-    gridWrapper: {
-        maxHeight: 'calc(4 * 148px + 3 * 1rem)', // 4 rows × card height + gaps
-        overflowY: 'auto',
-        overflowX: 'hidden',
-        paddingRight: '4px',
-        scrollbarWidth: 'thin' as const,
-    },
-    grid: {
-        display: 'grid',
-        gridTemplateColumns: 'repeat(4, 1fr)',
-        gap: '1rem',
-    },
-    agentCard: {
-        padding: '1.25rem',
-        display: 'flex',
-        flexDirection: 'column',
-        gap: '1rem',
-        cursor: 'pointer',
-        transition: 'transform 0.15s ease, box-shadow 0.15s ease',
-    },
-    agentHeader: {
-        display: 'flex',
-        justifyContent: 'space-between',
-        alignItems: 'flex-start',
-    },
-    agentInfo: {
-        display: 'flex',
-        flexDirection: 'column',
-    },
-    agentName: {
-        fontSize: '1.1rem',
-        fontWeight: '800',
-        letterSpacing: '-0.01em',
-    },
-    agentId: {
-        fontSize: '0.7rem',
-        color: 'var(--text-muted)',
-        fontWeight: '600',
-    },
-    forceBtn: {
-        background: 'rgba(239, 68, 68, 0.1)',
-        border: '1px solid rgba(239, 68, 68, 0.2)',
-        color: '#ef4444',
-        padding: '4px',
-        borderRadius: '6px',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        cursor: 'pointer',
-    },
-    statusDot: {
-        width: '10px',
-        height: '10px',
-        borderRadius: '50%',
-        boxShadow: '0 0 10px rgba(0,0,0,0.5)',
-    },
-    statusLabel: {
-        fontSize: '0.75rem',
-        fontWeight: '700',
-        color: 'var(--text-secondary)',
-        display: 'flex',
-        alignItems: 'center',
-    },
-    viewTabs: {
-        display: 'flex',
-        gap: '1rem',
-        marginBottom: '1rem',
-        borderBottom: '1px solid var(--glass-border)',
-        paddingBottom: '0.5rem',
-    },
-    viewTab: {
-        background: 'transparent',
-        border: 'none',
-        color: 'var(--text-muted)',
-        fontSize: '0.9rem',
-        fontWeight: '600',
-        padding: '0.5rem 1rem',
-    },
-    activeViewTab: {
-        color: 'var(--accent-yellow)',
-        borderBottom: '2px solid var(--accent-yellow)',
-    },
-    activityLog: {
-        padding: '1.5rem',
-        overflowX: 'auto',
-    },
-    sectionTitle: {
-        color: 'var(--accent-yellow)',
-        marginBottom: '1rem',
-        textTransform: 'uppercase',
-        fontSize: '1rem',
-        letterSpacing: '0.05em',
-    },
-    table: {
-        width: '100%',
-        borderCollapse: 'collapse',
-    },
-    th: {
-        textAlign: 'left',
-        padding: '1rem',
-        color: 'var(--text-muted)',
-        fontSize: '0.75rem',
-        textTransform: 'uppercase',
-        letterSpacing: '0.1em',
-    },
-    td: {
-        padding: '1rem',
-        borderTop: '1px solid var(--glass-border)',
-        fontSize: '0.85rem',
-    },
-    tr: {
-        transition: 'background 0.2s',
-        cursor: 'default',
-    },
-    statusBadge: {
-        padding: '2px 8px',
-        borderRadius: '4px',
-        border: '1px solid',
-        fontSize: '0.7rem',
-        fontWeight: '700',
-    },
-    iconBtn: {
-        background: 'transparent',
-        border: 'none',
-        color: 'var(--accent-blue)',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-    },
-    modalOverlay: {
-        position: 'fixed',
-        top: 0,
-        left: 0,
-        right: 0,
-        bottom: 0,
-        background: 'rgba(0,0,0,0.8)',
-        zIndex: 1000,
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        padding: '1rem',
-    },
-    modal: {
-        width: '100%',
-        maxWidth: '500px',
-        padding: '2rem',
-        display: 'flex',
-        flexDirection: 'column',
-        gap: '1.5rem',
-    },
-    modalTitle: {
-        color: 'var(--accent-yellow)',
-        fontSize: '1.25rem',
-        textTransform: 'uppercase',
-    },
-    modalContent: {
-        display: 'flex',
-        flexDirection: 'column',
-        gap: '0.75rem',
-        color: 'var(--text-secondary)',
-    },
-    modalActions: {
-        display: 'flex',
-        gap: '1rem',
-        marginTop: '1rem',
-    },
-    actions: {
-        display: 'flex',
-        gap: '0.75rem',
-        alignItems: 'center',
-    },
-    filterSelect: {
-        background: 'var(--bg-card)',
-        border: '1px solid var(--glass-border)',
-        borderRadius: '8px',
-        padding: '0.5rem 1rem',
-        color: 'var(--text-primary)',
-        fontSize: '0.8rem',
-        fontWeight: '700',
-        outline: 'none',
-        cursor: 'pointer',
-    },
-    createBtn: {
-        background: 'var(--accent-yellow)',
-        color: 'black',
-        border: 'none',
-        padding: '0.5rem 1rem',
-        borderRadius: '8px',
-        fontWeight: '800',
-        fontSize: '0.8rem',
-        display: 'flex',
-        alignItems: 'center',
-        gap: '6px',
-        cursor: 'pointer',
-    },
-    modalHeader: {
-        display: 'flex',
-        justifyContent: 'space-between',
-        alignItems: 'center',
-        marginBottom: '1rem',
-    },
-    formGroup: {
-        display: 'flex',
-        flexDirection: 'column',
-        gap: '0.5rem',
-        marginBottom: '1rem',
-    },
-    label: {
-        fontSize: '0.65rem',
-        fontWeight: '700',
-        color: 'var(--text-muted)',
-        letterSpacing: '0.05em',
-    },
-    input: {
-        background: 'rgba(0,0,0,0.3)',
-        border: '1px solid var(--glass-border)',
-        borderRadius: '8px',
-        padding: '0.75rem',
-        color: 'white',
-        fontSize: '0.9rem',
-        outline: 'none',
-    },
-    submitBtn: {
-        background: 'var(--accent-blue)',
-        color: 'white',
-        border: 'none',
-        padding: '1rem',
-        borderRadius: '8px',
-        fontWeight: '800',
-        width: '100%',
-        marginTop: '0.5rem',
-        cursor: 'pointer',
-    },
-    agentDetailHeader: {
-        display: 'flex',
-        flexDirection: 'column',
-    },
-    agentIdTag: {
-        fontSize: '0.7rem',
-        color: 'var(--text-muted)',
-        fontWeight: '700',
-    },
-    detailGrid: {
-        display: 'grid',
-        gridTemplateColumns: '1fr 1fr',
-        gap: '1rem',
-        marginBottom: '1.5rem',
-    },
-    detailItem: {
-        display: 'flex',
-        flexDirection: 'column',
-        background: 'var(--glass-bg)',
-        padding: '1rem',
-        borderRadius: '12px',
-        border: '1px solid var(--glass-border)',
-    },
-    detailLabel: {
-        fontSize: '0.6rem',
-        color: 'var(--text-muted)',
-        fontWeight: '700',
-        marginBottom: '0.25rem',
-    },
-    detailValue: {
-        fontSize: '1rem',
-        fontWeight: '800',
-        color: 'white',
-    },
-    sectionDivider: {
-        fontSize: '0.7rem',
-        fontWeight: '800',
-        color: 'var(--accent-yellow)',
-        letterSpacing: '0.1em',
-        marginBottom: '1rem',
-        display: 'flex',
-        alignItems: 'center',
-        gap: '1rem',
-    },
-    breakTimeline: {
-        display: 'flex',
-        flexDirection: 'column',
-        gap: '1rem',
-    },
-    timelineItem: {
-        display: 'flex',
-        gap: '1rem',
-        position: 'relative',
-        paddingLeft: '0.5rem',
-    },
-    timelinePoint: {
-        width: '8px',
-        height: '8px',
-        borderRadius: '50%',
-        background: 'var(--accent-yellow)',
-        marginTop: '0.4rem',
-    },
-    timelineContent: {
-        display: 'flex',
-        flexDirection: 'column',
-    },
-    timelineTime: {
-        fontSize: '0.85rem',
-        fontWeight: '700',
-        color: 'white',
-    },
-    timelineLabel: {
-        fontSize: '0.65rem',
-        color: 'var(--text-muted)',
-        fontWeight: '600',
-    },
-    emptyText: {
-        fontSize: '0.8rem',
-        color: 'var(--text-muted)',
-        fontStyle: 'italic',
-        textAlign: 'center',
-        padding: '1rem',
-    },
-    resolveBtn: {
-        background: '#10b981',
-        color: 'white',
-        border: 'none',
-        padding: '0.75rem 1.25rem',
-        borderRadius: '8px',
-        fontWeight: '700',
-        display: 'flex',
-        alignItems: 'center',
-        gap: '8px',
-    },
-    closeBtn: {
-        background: 'transparent',
-        border: '1px solid var(--glass-border)',
-        color: 'var(--text-primary)',
-        padding: '0.75rem 1.25rem',
-        borderRadius: '8px',
-        fontWeight: '600',
-        cursor: 'pointer',
-    },
-    rejectBtn: {
-        background: 'rgba(239, 68, 68, 0.1)',
-        color: '#ef4444',
-        border: '1px solid rgba(239, 68, 68, 0.2)',
-        padding: '0.75rem 1.25rem',
-        borderRadius: '8px',
-        fontWeight: '700',
-        cursor: 'pointer',
-    },
-    workstationShell: {
-        display: 'flex',
-        flexDirection: 'column',
-        gap: '1.25rem',
-        marginTop: '0.5rem',
-    },
-    kpiStrip: {
-        display: 'grid',
-        gridTemplateColumns: 'repeat(5, 1fr)',
-        gap: '1rem',
-    },
-    kpiCard: {
-        display: 'flex',
-        alignItems: 'center',
-        gap: '1rem',
-        padding: '1.25rem 1.5rem',
-        borderRadius: '14px',
-        border: '1px solid',
-        transition: 'transform 0.15s',
-    },
-    kpiIcon: {
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        width: '40px',
-        height: '40px',
-        borderRadius: '10px',
-        background: 'rgba(255,255,255,0.06)',
-        flexShrink: 0,
-    },
-    kpiBody: {
-        display: 'flex',
-        flexDirection: 'column',
-        gap: '2px',
-    },
-    kpiLabel: {
-        fontSize: '0.65rem',
-        fontWeight: '700',
-        color: 'var(--text-muted)',
-        textTransform: 'uppercase',
-        letterSpacing: '0.08em',
-    },
-    kpiValue: {
-        fontSize: '1.6rem',
-        fontWeight: '900',
-        lineHeight: 1,
-    },
-    wsBotRow: {
-        display: 'grid',
-        gridTemplateColumns: '1fr 1fr',
-        gap: '1.25rem',
-    },
-    wsPanel: {
-        padding: '1.5rem',
-        display: 'flex',
-        flexDirection: 'column',
-        gap: '1.25rem',
-    },
-    wsPanelHeader: {
-        display: 'flex',
-        alignItems: 'center',
-        gap: '10px',
-        marginBottom: '0.25rem',
-    },
-    wsPanelTitle: {
-        fontSize: '0.85rem',
-        fontWeight: '800',
-        color: 'white',
-        textTransform: 'uppercase',
-        letterSpacing: '0.06em',
-    },
-    breakdownRow: {
-        display: 'flex',
-        flexDirection: 'column',
-        gap: '6px',
-    },
-    breakdownMeta: {
-        display: 'flex',
-        alignItems: 'center',
-        gap: '8px',
-    },
-    breakdownDot: {
-        width: '8px',
-        height: '8px',
-        borderRadius: '50%',
-        flexShrink: 0,
-    },
-    breakdownLabel: {
-        fontSize: '0.75rem',
-        color: 'var(--text-secondary)',
-        fontWeight: '600',
-    },
-    breakdownCount: {
-        fontSize: '0.75rem',
-        fontWeight: '800',
-        marginLeft: 'auto',
-    },
-    barTrack: {
-        height: '6px',
-        borderRadius: '999px',
-        background: 'rgba(255,255,255,0.07)',
-        overflow: 'hidden',
-    },
-    barFill: {
-        height: '100%',
-        borderRadius: '999px',
-        transition: 'width 0.6s ease',
-    },
-    ticketStatGrid: {
-        display: 'grid',
-        gridTemplateColumns: 'repeat(3, 1fr)',
-        gap: '1rem',
-        flex: 1,
-    },
-    ticketStatItem: {
-        display: 'flex',
-        flexDirection: 'column',
-        alignItems: 'center',
-        background: 'rgba(255,255,255,0.04)',
-        borderRadius: '10px',
-        padding: '0.6rem 0.5rem',
-        border: '1px solid var(--glass-border)',
-    },
-    ticketStatNum: {
-        fontSize: '1.4rem',
-        fontWeight: '900',
-        lineHeight: 1,
-    },
-    ticketStatLabel: {
-        fontSize: '0.6rem',
-        color: 'var(--text-muted)',
-        fontWeight: '700',
-        textTransform: 'uppercase',
-        marginTop: '4px',
-    },
-    recentTicketsSection: {
-        marginTop: '1.5rem',
-        padding: '1rem',
-        display: 'flex',
-        flexDirection: 'column',
-        gap: '1rem',
-    },
-    sectionHeader: {
-        display: 'flex',
-        alignItems: 'center',
-        gap: '12px',
-    },
-    sectionIndicator: {
-        width: '4px',
-        height: '24px',
-        background: 'var(--accent-blue)',
-        borderRadius: '2px',
-    },
-    scrollContainer: {
-        display: 'flex',
-        flexDirection: 'column',
-        gap: '0.75rem',
-        maxHeight: '400px',
-        overflowY: 'auto',
-        paddingRight: '8px',
-    },
-    ticketDetailCard: {
-        background: 'rgba(255, 255, 255, 0.03)',
-        border: '1px solid var(--glass-border)',
-        borderRadius: '12px',
-        padding: '1rem',
-        display: 'flex',
-        flexDirection: 'column',
-        gap: '0.75rem',
-        cursor: 'pointer',
-    },
-    ticketCardHeader: {
-        display: 'flex',
-        justifyContent: 'space-between',
-        alignItems: 'center',
-    },
-    ticketIdText: {
-        fontSize: '1rem',
-        fontWeight: '900',
-        color: 'var(--accent-blue)',
-        fontFamily: 'monospace',
-    },
-    ticketCardRow: {
-        display: 'flex',
-        justifyContent: 'space-between',
-        alignItems: 'center',
-    },
-    ticketRowLabel: {
-        fontSize: '0.8rem',
-        color: 'var(--text-muted)',
-    },
-    ticketRowValue: {
-        fontSize: '0.8rem',
-        fontWeight: '800',
-        color: 'white',
-        textTransform: 'uppercase',
-    },
-    descriptionBox: {
-        background: 'rgba(0, 0, 0, 0.2)',
-        padding: '8px',
-        borderRadius: '6px',
-        fontSize: '0.75rem',
-        color: 'var(--text-primary)',
-        lineHeight: '1.4',
-    },
-    ticketCardFooter: {
-        display: 'flex',
-        justifyContent: 'flex-end',
-        fontSize: '0.7rem',
-        color: 'var(--text-muted)',
-    },
-    ticketActions: {
-        display: 'flex',
-        justifyContent: 'flex-end',
-        gap: '0.75rem',
-        marginTop: '0.5rem',
-    },
-    approveBtn: {
-        background: '#10b981',
-        color: 'white',
-        border: 'none',
-        padding: '0.4rem 1.25rem',
-        borderRadius: '6px',
-        fontWeight: '900',
-        fontSize: '0.65rem',
-        cursor: 'pointer',
-        transition: 'all 0.2s ease',
-    },
-    rejectCardBtn: {
-        background: 'rgba(239, 68, 68, 0.1)',
-        color: '#ef4444',
-        border: '1px solid rgba(239, 68, 68, 0.2)',
-        padding: '0.4rem 1.25rem',
-        borderRadius: '6px',
-        fontWeight: '900',
-        fontSize: '0.65rem',
-        cursor: 'pointer',
-    },
 };
 
 export default SupervisorDashboard;

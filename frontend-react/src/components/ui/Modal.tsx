@@ -1,7 +1,7 @@
 import React from 'react';
 import { createPortal } from 'react-dom';
 
-export const Modal: React.FC<{
+const Modal: React.FC<{
   open: boolean;
   onOpenChange: (open: boolean) => void;
   title?: string;

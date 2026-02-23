@@ -1,7 +1,16 @@
 import express from 'express';
 import cors from 'cors';
 import jwt from 'jsonwebtoken';
-import { getDb, ObjectId } from '../db.js';
+import passport from 'passport';
+import multer from 'multer';
+import path from 'path';
+import { fileURLToPath } from 'url';
+import fs from 'fs';
+import { connectDb } from '../db.js';
+import Agent from '../models/Agent.js';
+import Session from '../models/Session.js';
+import Ticket from '../models/Ticket.js';
+import passportConfig from '../passport.js';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'omnisync_super_secret_key_2024';
 const JWT_EXPIRES = '8h';
@@ -12,30 +21,48 @@ const PORT = process.env.PORT || 3003;
 app.use(cors());
 app.use(express.json({ limit: '10mb' }));
 
-// ── JWT middleware ─────────────────────────────────────────────────────
-const authenticateToken = (req, res, next) => {
-  const authHeader = req.headers['authorization'];
-  const token = authHeader && authHeader.split(' ')[1]; // Bearer <token>
-  if (!token) return res.status(401).json({ error: 'UNAUTHORIZED' });
-  try {
-    req.user = jwt.verify(token, JWT_SECRET);
-    next();
-  } catch {
-    return res.status(401).json({ error: 'TOKEN_INVALID' });
+// Setup __dirname for ES modules
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+// Ensure uploads directory exists
+const uploadsDir = path.join(__dirname, '..', 'uploads');
+if (!fs.existsSync(uploadsDir)) {
+  fs.mkdirSync(uploadsDir, { recursive: true });
+}
+
+// Serve uploads folder statically
+app.use('/uploads', express.static(uploadsDir));
+
+// Multer Config
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    cb(null, uploadsDir);
+  },
+  filename: (req, file, cb) => {
+    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1e9);
+    cb(null, uniqueSuffix + '-' + file.originalname);
   }
-};
+});
+const upload = multer({ storage });
+
+// Initialize Passport
+passportConfig(passport);
+app.use(passport.initialize());
+
+// Connect to DB
+connectDb().catch(err => {
+  console.error('[API] Failed to connect to DB:', err);
+});
+
+// ── Authentication Protection Middleware ──────────────────────────
+const authenticateToken = passport.authenticate('jwt', { session: false });
 
 app.get('/health', (req, res) => {
   res.json({ status: 'ok' });
 });
 
-async function collection(name) {
-  const db = await getDb();
-  return db.collection(name);
-}
-
 // ── Auth ────────────────────────────────────────────────────────────────
-// POST /api/auth/login  — no JWT required
 app.post('/api/auth/login', async (req, res) => {
   try {
     const { id, password } = req.body || {};
@@ -44,25 +71,36 @@ app.post('/api/auth/login', async (req, res) => {
     }
 
     const normalizedId = id.toLowerCase().trim();
-    const col = await collection('agents');
-    const user = await col.findOne({ agentId: normalizedId });
+    const agent = await Agent.findOne({ agentId: normalizedId });
 
-    // Fallback: if no DB user found, use config-based mock credentials
-    // This keeps backward-compat while DB is being seeded with passwords
     let role = null;
-    if (!user) {
-      // Config-based fallback (same logic as old client-side mock)
+    if (!agent) {
+      // Fallback for missing DB user (development default)
       if (normalizedId.startsWith('a') && password === 'agent123') role = 'agent';
       else if ((normalizedId === 'admin' || normalizedId.startsWith('sup')) && password === 'sup123') role = 'supervisor';
     } else {
-      // DB user: check stored password (plain text for now; swap for bcrypt later)
-      const storedPassword = user.password;
-      if (!storedPassword) {
-        // No password set → fall back to config defaults
-        if (normalizedId.startsWith('a') && password === 'agent123') role = user.role || 'agent';
-        else if ((normalizedId === 'admin' || normalizedId.startsWith('sup')) && password === 'sup123') role = user.role || 'supervisor';
-      } else if (storedPassword === password) {
-        role = user.role || (normalizedId.startsWith('sup') || normalizedId === 'admin' ? 'supervisor' : 'agent');
+      // DB user: compare password securely
+      const isMatch = await agent.comparePassword(password);
+      if (isMatch) {
+        role = agent.role;
+      } else {
+        // Fallback for legacy plain-text password check (auto-hashes on first success)
+        if (agent.password === password) {
+          role = agent.role;
+          // Update to hashed password
+          agent.password = password;
+          await agent.save();
+        } else if (!agent.password) {
+          // No password set at all → fall back to config defaults
+          if (normalizedId.startsWith('a') && password === 'agent123') role = agent.role || 'agent';
+          else if ((normalizedId === 'admin' || normalizedId.startsWith('sup')) && password === 'sup123') role = agent.role || 'supervisor';
+
+          if (role) {
+            // Set password for future secure logins
+            agent.password = password;
+            await agent.save();
+          }
+        }
       }
     }
 
@@ -73,19 +111,36 @@ app.post('/api/auth/login', async (req, res) => {
     const token = jwt.sign({ id: normalizedId, role }, JWT_SECRET, { expiresIn: JWT_EXPIRES });
     res.json({ token, id: normalizedId, role });
   } catch (err) {
-    console.error('[API] POST /api/auth/login failed', err);
-    res.status(500).json({ error: 'INTERNAL_ERROR' });
+    console.error('[API] POST /api/auth/login failed:', err);
+    res.status(500).json({ error: 'INTERNAL_ERROR', details: err.message });
   }
 });
 
-// All routes below require a valid JWT
 app.use('/api', authenticateToken);
+
+// ── File Upload ────────────────────────────────────────────────────────
+app.post('/api/upload', upload.single('file'), (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ error: 'NO_FILE_UPLOADED' });
+    }
+    const fileUrl = `/uploads/${req.file.filename}`;
+    res.json({
+      url: fileUrl,
+      filename: req.file.filename,
+      mimetype: req.file.mimetype,
+      size: req.file.size
+    });
+  } catch (err) {
+    console.error('[API] POST /api/upload failed:', err);
+    res.status(500).json({ error: 'UPLOAD_FAILED' });
+  }
+});
 
 // Agents
 app.get('/api/agents', async (req, res) => {
   try {
-    const col = await collection('agents');
-    const agents = await col.find({}).toArray();
+    const agents = await Agent.find({});
     res.json(agents);
   } catch (err) {
     console.error('[API] GET /api/agents failed', err);
@@ -96,8 +151,7 @@ app.get('/api/agents', async (req, res) => {
 app.get('/api/agents/:agentId', async (req, res) => {
   try {
     const { agentId } = req.params;
-    const col = await collection('agents');
-    const agent = await col.findOne({ agentId });
+    const agent = await Agent.findOne({ agentId });
     if (!agent) return res.status(404).json({ error: 'NOT_FOUND' });
     res.json(agent);
   } catch (err) {
@@ -109,23 +163,14 @@ app.get('/api/agents/:agentId', async (req, res) => {
 // Agent sessions
 app.post('/api/agent-sessions', async (req, res) => {
   try {
-    const session = req.body;
-    if (!session || !session.sessionID || !session.agentId) {
+    const sessionData = req.body;
+    if (!sessionData || !sessionData.sessionID || !sessionData.agentId) {
       return res.status(400).json({ error: 'INVALID_SESSION' });
     }
 
-    const col = await collection('agent_sessions');
-
-    // Explicitly rebuild updateData to avoid internal fields
-    const updateData = {};
-    const allowedKeys = ['sessionID', 'agentId', 'clockInTime', 'clockOutTime', 'onCall', 'status', 'breaks', 'lastActivity'];
-    allowedKeys.forEach(key => {
-      if (session[key] !== undefined) updateData[key] = session[key];
-    });
-
-    await col.updateOne(
-      { sessionID: session.sessionID },
-      { $set: { ...updateData, updatedAt: new Date() }, $setOnInsert: { createdAt: new Date() } },
+    await Session.updateOne(
+      { sessionID: sessionData.sessionID },
+      { $set: sessionData },
       { upsert: true }
     );
 
@@ -138,13 +183,11 @@ app.post('/api/agent-sessions', async (req, res) => {
 
 app.get('/api/agent-sessions', async (req, res) => {
   try {
-    const col = await collection('agent_sessions');
-    // Get latest session for each agentId
-    const sessions = await col.aggregate([
+    const sessions = await Session.aggregate([
       { $sort: { updatedAt: -1 } },
       { $group: { _id: '$agentId', latestSession: { $first: '$$ROOT' } } },
       { $replaceRoot: { newRoot: '$latestSession' } }
-    ]).toArray();
+    ]);
     res.json(sessions);
   } catch (err) {
     console.error('[API] GET /api/agent-sessions failed', err);
@@ -155,18 +198,13 @@ app.get('/api/agent-sessions', async (req, res) => {
 app.get('/api/agents/:agentId/sessions/current', async (req, res) => {
   try {
     const { agentId } = req.params;
-    const col = await collection('agent_sessions');
-    const sessions = await col
-      .find({ agentId })
-      .sort({ clockInTime: -1 })
-      .limit(1)
-      .toArray();
+    const session = await Session.findOne({ agentId, clockOutTime: null }).sort({ clockInTime: -1 });
 
-    if (!sessions.length) {
+    if (!session) {
       return res.status(404).json({ error: 'NOT_FOUND' });
     }
 
-    res.json(sessions[0]);
+    res.json(session);
   } catch (err) {
     console.error('[API] GET /api/agents/:agentId/sessions/current failed', err);
     res.status(500).json({ error: 'INTERNAL_ERROR' });
@@ -176,14 +214,10 @@ app.get('/api/agents/:agentId/sessions/current', async (req, res) => {
 app.post('/api/agents/:agentId/force-logout', async (req, res) => {
   try {
     const { agentId } = req.params;
-    const col = await collection('agent_sessions');
-
-    // Find latest active session and mark for logout
-    await col.updateOne(
+    await Session.updateOne(
       { agentId, clockOutTime: null },
-      { $set: { forceLoggedOut: true, updatedAt: new Date() } }
+      { $set: { forceLoggedOut: true } }
     );
-
     res.json({ ok: true });
   } catch (err) {
     console.error('[API] POST /api/agents/:agentId/force-logout failed', err);
@@ -194,23 +228,14 @@ app.post('/api/agents/:agentId/force-logout', async (req, res) => {
 // Tickets
 app.post('/api/tickets', async (req, res) => {
   try {
-    const ticket = req.body;
-    if (!ticket || !ticket.ticketId || !ticket.agentId) {
+    const ticketData = req.body;
+    if (!ticketData || !ticketData.ticketId || !ticketData.agentId) {
       return res.status(400).json({ error: 'INVALID_TICKET' });
     }
 
-    const col = await collection('tickets');
-
-    // Explicitly rebuild updateData
-    const updateData = {};
-    const allowedKeys = ['ticketId', 'agentId', 'issueType', 'description', 'status', 'issueDateTime', 'priority', 'attachments', 'createdBy', 'resolution'];
-    allowedKeys.forEach(key => {
-      if (ticket[key] !== undefined) updateData[key] = ticket[key];
-    });
-
-    await col.updateOne(
-      { ticketId: ticket.ticketId },
-      { $set: { ...updateData, updatedAt: new Date() }, $setOnInsert: { createdAt: new Date() } },
+    await Ticket.updateOne(
+      { ticketId: ticketData.ticketId },
+      { $set: ticketData },
       { upsert: true }
     );
 
@@ -224,8 +249,7 @@ app.post('/api/tickets', async (req, res) => {
 app.get('/api/agents/:agentId/tickets', async (req, res) => {
   try {
     const { agentId } = req.params;
-    const col = await collection('tickets');
-    const tickets = await col.find({ agentId }).sort({ issueDateTime: -1 }).toArray();
+    const tickets = await Ticket.find({ agentId }).sort({ issueDateTime: -1 });
     res.json(tickets);
   } catch (err) {
     console.error('[API] GET /api/agents/:agentId/tickets failed', err);
@@ -235,8 +259,7 @@ app.get('/api/agents/:agentId/tickets', async (req, res) => {
 
 app.get('/api/tickets', async (req, res) => {
   try {
-    const col = await collection('tickets');
-    const tickets = await col.find({}).sort({ issueDateTime: -1 }).toArray();
+    const tickets = await Ticket.find({}).sort({ issueDateTime: -1 });
     res.json(tickets);
   } catch (err) {
     console.error('[API] GET /api/tickets failed', err);
@@ -249,10 +272,9 @@ app.patch('/api/tickets/:ticketId', async (req, res) => {
     const { ticketId } = req.params;
     const updates = req.body || {};
 
-    const col = await collection('tickets');
-    const result = await col.updateOne(
+    const result = await Ticket.updateOne(
       { ticketId },
-      { $set: { ...updates, updatedAt: new Date() } }
+      { $set: updates }
     );
 
     if (!result.matchedCount) {
@@ -270,8 +292,7 @@ app.patch('/api/tickets/:ticketId', async (req, res) => {
 app.get('/api/supervisors/:supervisorId/activity', async (req, res) => {
   try {
     const { supervisorId } = req.params;
-    const col = await collection('tickets');
-    const activity = await col.find({ createdBy: supervisorId }).sort({ createdAt: -1 }).toArray();
+    const activity = await Ticket.find({ createdBy: supervisorId }).sort({ createdAt: -1 });
     res.json(activity);
   } catch (err) {
     console.error('[API] GET /api/supervisors/:supervisorId/activity failed', err);
@@ -279,22 +300,17 @@ app.get('/api/supervisors/:supervisorId/activity', async (req, res) => {
   }
 });
 
-// Queue stats for header (replaces SSE mock)
+// Queue stats
 app.get('/api/queue-stats', async (req, res) => {
   try {
-    const db = await getDb();
-    const ticketsCol = db.collection('tickets');
-    const sessionsCol = db.collection('agent_sessions');
-
     const [waitingCalls, activeAgentsResult, slaResolved, totalTickets] = await Promise.all([
-      ticketsCol.countDocuments({ status: { $in: ['OPEN', 'IN_PROGRESS', 'ASSIGNED', 'RESOLUTION_REQUESTED'] } }),
-      sessionsCol.distinct('agentId', { clockOutTime: null }),
-      ticketsCol.countDocuments({ status: 'RESOLVED' }),
-      ticketsCol.countDocuments({})
+      Ticket.countDocuments({ status: { $in: ['OPEN', 'IN_PROGRESS', 'ASSIGNED', 'RESOLUTION_REQUESTED'] } }),
+      Session.distinct('agentId', { clockOutTime: null }),
+      Ticket.countDocuments({ status: 'RESOLVED' }),
+      Ticket.countDocuments({})
     ]);
 
     const activeAgents = activeAgentsResult.length;
-
     const slaPercent = totalTickets ? Math.round((slaResolved / totalTickets) * 100) : 0;
 
     res.json({

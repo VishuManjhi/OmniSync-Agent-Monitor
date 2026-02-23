@@ -59,4 +59,5 @@ export interface QueueStats {
     waitingCalls: number;
     activeAgents: number;
     slaPercent: number;
+    avgHandleTime?: number;
 }

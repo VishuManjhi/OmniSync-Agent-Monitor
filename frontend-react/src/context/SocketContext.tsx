@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useEffect, useState, useRef } from 'react';
 import { useAuth } from './AuthContext';
+import { io, Socket } from 'socket.io-client';
 
 interface WebSocketContextType {
     lastMessage: any;
@@ -13,44 +14,42 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     const { user } = useAuth();
     const [isConnected, setIsConnected] = useState(false);
     const [lastMessage, setLastMessage] = useState<any>(null);
-    const socketRef = useRef<WebSocket | null>(null);
+    const socketRef = useRef<Socket | null>(null);
 
     useEffect(() => {
         if (!user) return;
 
-        const ws = new WebSocket('ws://localhost:8080');
+        const socket = io('http://localhost:8080');
 
-        ws.onopen = () => {
+        socket.on('connect', () => {
             console.log('[WS] Connected');
             setIsConnected(true);
             // Identify ourselves to the server
-            ws.send(JSON.stringify({
-                type: 'identify',
+            socket.emit('identify', {
                 agentId: user.id,
                 role: user.role
-            }));
-        };
+            });
+        });
 
-        ws.onmessage = (event) => {
-            const data = JSON.parse(event.data);
+        socket.on('message', (data) => {
             setLastMessage(data);
-        };
+        });
 
-        ws.onclose = () => {
+        socket.on('disconnect', () => {
             console.log('[WS] Disconnected');
             setIsConnected(false);
-        };
+        });
 
-        socketRef.current = ws;
+        socketRef.current = socket;
 
         return () => {
-            ws.close();
+            socket.disconnect();
         };
     }, [user]);
 
     const sendMessage = (msg: any) => {
-        if (socketRef.current?.readyState === WebSocket.OPEN) {
-            socketRef.current.send(JSON.stringify(msg));
+        if (socketRef.current?.connected) {
+            socketRef.current.emit('message', msg);
         }
     };
 
