@@ -75,7 +75,7 @@ export const TicketModal: React.FC<{
                     <>
                         <div style={styles.detailItem}>
                             <span style={styles.detailLabel}>TICKET ID</span>
-                            <span style={styles.detailValue}>{ticket.ticketId}</span>
+                            <span style={styles.detailValue}>{ticket.displayId || ticket.ticketId.substring(0, 8).toUpperCase()}</span>
                         </div>
                         <div style={styles.detailItem}>
                             <span style={styles.detailLabel}>AGENT</span>

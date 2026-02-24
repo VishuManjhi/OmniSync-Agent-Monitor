@@ -36,6 +36,7 @@ export interface Attachment {
 export interface Ticket {
     _id: string;
     ticketId: string;
+    displayId: string;
     agentId: string;
     issueType: string;
     description: string;

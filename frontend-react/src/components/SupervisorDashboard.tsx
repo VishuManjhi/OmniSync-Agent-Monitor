@@ -304,7 +304,7 @@ const SupervisorDashboard: React.FC = () => {
                                     .map(ticket => (
                                         <div key={ticket.ticketId} style={styles.ticketDetailCard} onClick={() => setSelectedTicket(ticket)}>
                                             <div style={styles.ticketCardHeader}>
-                                                <span style={styles.ticketIdText}>#{ticket.ticketId.substring(0, 4).toUpperCase()}</span>
+                                                <span style={styles.ticketIdText}>{ticket.displayId || `#${ticket.ticketId.substring(0, 8).toUpperCase()}`}</span>
                                                 <span style={{
                                                     ...styles.statusBadge,
                                                     background: 'rgba(168, 85, 247, 0.2)',
@@ -400,6 +400,7 @@ const SupervisorDashboard: React.FC = () => {
                                             const search = debouncedSearchTerm.toUpperCase();
                                             const matchesSearch = !debouncedSearchTerm ||
                                                 ticket.ticketId.toUpperCase().includes(search) ||
+                                                (ticket.displayId && ticket.displayId.toUpperCase().includes(search)) ||
                                                 ticket.agentId.toUpperCase().includes(search) ||
                                                 (agent && agent.name.toUpperCase().includes(search));
 
@@ -423,7 +424,7 @@ const SupervisorDashboard: React.FC = () => {
                                             return (
                                                 <tr key={ticket.ticketId} style={styles.tr} onClick={() => setSelectedTicket(ticket)}>
                                                     <td style={{ ...styles.td, fontSize: '0.7rem', color: isPriority ? '#ef4444' : 'var(--accent-yellow)', fontWeight: '700' }}>
-                                                        {ticket.ticketId}
+                                                        {ticket.displayId || ticket.ticketId.substring(0, 8).toUpperCase()}
                                                         {isPriority && <div style={{ fontSize: '0.6rem', color: '#ef4444', fontWeight: '800' }}>PRIORITY</div>}
                                                     </td>
                                                     <td style={styles.td}>
@@ -571,7 +572,8 @@ const SupervisorDashboard: React.FC = () => {
                     onSubmit={(ticketData) => {
                         const newTicket: Partial<Ticket> = {
                             ...ticketData,
-                            ticketId: `TICK-${Date.now()}`,
+                            ticketId: crypto.randomUUID(),
+                            displayId: `${ticketData.issueType}-${ticketData.agentId || 'QUEUE'}-${Math.floor(100 + Math.random() * 899)}`.toUpperCase(),
                             issueDateTime: Date.now(),
                             status: (ticketData.agentId ? 'ASSIGNED' : 'OPEN') as Ticket['status'],
                             createdBy: user?.id,

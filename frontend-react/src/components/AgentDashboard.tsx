@@ -282,6 +282,7 @@ const AgentDashboard: React.FC = () => {
         try {
             const ticket: Partial<Ticket> = {
                 ticketId: crypto.randomUUID(),
+                displayId: `${issueType}-${user.id}-${Math.floor(100 + Math.random() * 899)}`.toUpperCase(),
                 agentId: user.id,
                 issueType,
                 description,
@@ -533,7 +534,7 @@ const AgentDashboard: React.FC = () => {
                                         <div key={t._id} className="hover-lift" style={styles.ticketItem}>
                                             <div style={styles.ticketContent}>
                                                 <div style={styles.ticketHeader}>
-                                                    <span style={styles.ticketId}>#{t.ticketId.substring(0, 8).toUpperCase()}</span>
+                                                    <span style={styles.ticketId}>{t.displayId || `#${t.ticketId.substring(0, 8).toUpperCase()}`}</span>
                                                     <span style={styles.ticketType}>{t.issueType}</span>
                                                     <span style={{
                                                         ...styles.statusTag,

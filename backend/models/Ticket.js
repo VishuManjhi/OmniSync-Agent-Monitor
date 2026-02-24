@@ -10,6 +10,7 @@ const attachmentSchema = new mongoose.Schema({
 
 const ticketSchema = new mongoose.Schema({
     ticketId: { type: String, required: true, unique: true, index: true },
+    displayId: { type: String, unique: true, index: true },
     agentId: { type: String, required: true, index: true },
     issueType: { type: String, required: true },
     description: { type: String },
