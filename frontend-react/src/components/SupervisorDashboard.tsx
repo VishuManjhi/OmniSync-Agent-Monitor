@@ -14,20 +14,27 @@ import { TicketModal } from './dashboard/TicketModal';
 import { CreateTicketModal } from './dashboard/CreateTicketModal';
 import { AgentDetailsModal } from './dashboard/AgentDetailsModal';
 import { deriveAgentStatus } from './dashboard/utils';
+import ConfirmationModal from './ui/ConfirmationModal';
 import { addToQueue } from '../api/indexedDB';
+import { useDebounce } from '../hooks/useDebounce';
+import { useNotification } from '../context/NotificationContext';
 
 const SupervisorDashboard: React.FC = () => {
     const { logout, user } = useAuth();
     const { lastMessage, sendMessage } = useWebSocket();
     const queryClient = useQueryClient();
+    const { showNotification } = useNotification();
 
     const [selectedTicket, setSelectedTicket] = useState<Ticket | null>(null);
     const [selectedAgent, setSelectedAgent] = useState<Agent | null>(null);
     const [showCreateTicket, setShowCreateTicket] = useState(false);
     const [searchTerm, setSearchTerm] = useState('');
+    const debouncedSearchTerm = useDebounce(searchTerm, 300);
     const [statusFilter, setStatusFilter] = useState('ALL');
     const [view, setView] = useState<'MONITOR' | 'ACTIVITY' | 'WORKSTATION'>('MONITOR');
     const [activityFilter, setActivityFilter] = useState('ALL');
+    const [page, setPage] = useState(1);
+    const [confirmLogoutAgent, setConfirmLogoutAgent] = useState<string | null>(null);
 
     // Queries
     const { data: agents = [], isLoading: isLoadingAgents } = useQuery({
@@ -49,11 +56,14 @@ const SupervisorDashboard: React.FC = () => {
         refetchInterval: 10000 // Refresh every 10s
     });
 
-    const { data: activity = [], isLoading: isLoadingActivity } = useQuery({
-        queryKey: ['all-tickets'],
-        queryFn: fetchTickets,
+    const { data: activityData, isLoading: isLoadingActivity } = useQuery({
+        queryKey: ['all-tickets', page],
+        queryFn: () => fetchTickets(page, 10),
         enabled: !!user?.id
     });
+
+    const activity = activityData?.tickets || [];
+    const totalPages = activityData?.pages || 1;
 
     const loading = isLoadingAgents || isLoadingSessions || isLoadingStats || isLoadingActivity;
 
@@ -68,14 +78,22 @@ const SupervisorDashboard: React.FC = () => {
                 updates: variables.updates,
                 agentId: selectedTicket?.agentId
             });
+            showNotification(`Ticket ${variables.ticketId} updated successfully`, 'success', 'TRANSMISSION UPDATED');
             setSelectedTicket(null);
+        },
+        onError: (err: any) => {
+            showNotification(err.message || 'Failed to update ticket', 'error', 'SYSTEM ERROR');
         }
     });
 
     const forceLogoutMutation = useMutation({
         mutationFn: forceLogout,
-        onSuccess: () => {
+        onSuccess: (_, agentId) => {
             queryClient.invalidateQueries({ queryKey: ['sessions'] });
+            showNotification(`Agent ${agentId} has been terminated from the session.`, 'success', 'ACCESS REVOKED');
+        },
+        onError: (err: any) => {
+            showNotification(err.message || 'Failed to logout agent', 'error', 'SYSTEM ERROR');
         }
     });
 
@@ -84,7 +102,11 @@ const SupervisorDashboard: React.FC = () => {
         onSuccess: (_, variables) => {
             queryClient.invalidateQueries({ queryKey: ['all-tickets'] });
             sendMessage({ type: 'TICKET_CREATED', ticket: variables, agentId: variables.agentId });
+            showNotification(`Ticket created and assigned to ${variables.agentId || 'Queue'}`, 'success', 'TRANSMISSION CREATED');
             setShowCreateTicket(false);
+        },
+        onError: (err: any) => {
+            showNotification(err.message || 'Failed to create ticket', 'error', 'SYSTEM ERROR');
         }
     });
 
@@ -104,21 +126,27 @@ const SupervisorDashboard: React.FC = () => {
         }
     }, [lastMessage, queryClient]);
 
-    const handleForceLogout = async (agentId: string) => {
-        if (window.confirm(`Force logout agent ${agentId}?`)) {
-            if (!navigator.onLine) {
-                try {
-                    await addToQueue({ type: 'FORCE_LOGOUT', payload: { agentId } });
-                    alert(`Offline: Force logout for ${agentId} queued for synchronization.`);
-                    return;
-                } catch (err) {
-                    console.error('Failed to queue offline action:', err);
-                }
-            }
+    const handleForceLogout = (agentId: string) => {
+        setConfirmLogoutAgent(agentId);
+    };
 
-            forceLogoutMutation.mutate(agentId);
-            sendMessage({ type: 'FORCE_LOGOUT', agentId });
+    const executeForceLogout = async () => {
+        const agentId = confirmLogoutAgent;
+        if (!agentId) return;
+
+        setConfirmLogoutAgent(null);
+        if (!navigator.onLine) {
+            try {
+                await addToQueue({ type: 'FORCE_LOGOUT', payload: { agentId } });
+                showNotification(`Offline: Force logout for ${agentId} queued for synchronization.`, 'warning', 'NETWORK OFFLINE');
+                return;
+            } catch (err) {
+                console.error('Failed to queue offline action:', err);
+            }
         }
+
+        forceLogoutMutation.mutate(agentId);
+        sendMessage({ type: 'FORCE_LOGOUT', agentId });
     };
 
     // Derived Statistics
@@ -243,7 +271,8 @@ const SupervisorDashboard: React.FC = () => {
                                     .filter(a => {
                                         const session = sessions.find(s => s.agentId === a.agentId);
                                         const status = deriveAgentStatus(session);
-                                        const matchesSearch = a.name.toUpperCase().includes(searchTerm) || a.agentId.toUpperCase().includes(searchTerm);
+                                        const search = debouncedSearchTerm.toUpperCase();
+                                        const matchesSearch = a.name.toUpperCase().includes(search) || a.agentId.toUpperCase().includes(search);
                                         const matchesFilter = statusFilter === 'ALL' || status === statusFilter;
                                         return matchesSearch && matchesFilter;
                                     })
@@ -368,8 +397,8 @@ const SupervisorDashboard: React.FC = () => {
                                     {activity
                                         .filter(ticket => {
                                             const agent = agents.find(a => a.agentId === ticket.agentId);
-                                            const search = searchTerm.toUpperCase();
-                                            const matchesSearch = !searchTerm ||
+                                            const search = debouncedSearchTerm.toUpperCase();
+                                            const matchesSearch = !debouncedSearchTerm ||
                                                 ticket.ticketId.toUpperCase().includes(search) ||
                                                 ticket.agentId.toUpperCase().includes(search) ||
                                                 (agent && agent.name.toUpperCase().includes(search));
@@ -427,6 +456,23 @@ const SupervisorDashboard: React.FC = () => {
                                         })}
                                 </tbody>
                             </table>
+                        </div>
+                        <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', marginTop: '1rem', gap: '1rem' }}>
+                            <button
+                                onClick={() => setPage(p => Math.max(1, p - 1))}
+                                disabled={page === 1}
+                                style={{ ...styles.createBtn, opacity: page === 1 ? 0.5 : 1, padding: '0.5rem 1rem' }}
+                            >
+                                Previous
+                            </button>
+                            <span style={{ color: 'var(--text-light)', fontWeight: '600', fontSize: '0.9rem' }}>Page {page} of {totalPages}</span>
+                            <button
+                                onClick={() => setPage(p => Math.min(totalPages, p + 1))}
+                                disabled={page === totalPages}
+                                style={{ ...styles.createBtn, opacity: page === totalPages ? 0.5 : 1, padding: '0.5rem 1rem' }}
+                            >
+                                Next
+                            </button>
                         </div>
                     </div>
                 ) : (
@@ -544,6 +590,17 @@ const SupervisorDashboard: React.FC = () => {
                     onClose={() => setSelectedAgent(null)}
                 />
             )}
+
+            <ConfirmationModal
+                isOpen={!!confirmLogoutAgent}
+                title="REVOKE SESSION ACCESS"
+                message={`Are you sure you want to forcibly terminate the session for agent ${confirmLogoutAgent}? This action will immediately logout the agent.`}
+                confirmText="TERMINATE SESSION"
+                cancelText="CANCEL"
+                type="danger"
+                onConfirm={executeForceLogout}
+                onCancel={() => setConfirmLogoutAgent(null)}
+            />
         </div>
     );
 };

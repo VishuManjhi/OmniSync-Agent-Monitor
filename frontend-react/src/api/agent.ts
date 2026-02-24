@@ -1,9 +1,10 @@
 import { apiFetch } from './base';
-import type { Agent, AgentSession, Ticket, QueueStats } from './types';
+import type { Agent, AgentSession, Ticket, QueueStats, PaginatedTickets } from './types';
 
 export const fetchAgents = () => apiFetch<Agent[]>('/api/agents');
 export const fetchSessions = () => apiFetch<AgentSession[]>('/api/agent-sessions');
-export const fetchTickets = () => apiFetch<Ticket[]>('/api/tickets');
+export const fetchTickets = (page = 1, limit = 10) =>
+    apiFetch<PaginatedTickets>(`/api/tickets?page=${page}&limit=${limit}`);
 export const fetchQueueStats = () => apiFetch<QueueStats>('/api/queue-stats');
 export const fetchSupervisorActivity = (supervisorId: string) =>
     apiFetch<Ticket[]>(`/api/supervisors/${supervisorId}/activity`);
@@ -32,8 +33,8 @@ export const saveAgentSession = (session: Partial<AgentSession>) =>
 export const fetchCurrentSession = (agentId: string) =>
     apiFetch<AgentSession>(`/api/agents/${agentId}/sessions/current`);
 
-export const fetchAgentTickets = (agentId: string) =>
-    apiFetch<Ticket[]>(`/api/agents/${agentId}/tickets`);
+export const fetchAgentTickets = (agentId: string, page = 1, limit = 10, search = '') =>
+    apiFetch<PaginatedTickets>(`/api/agents/${agentId}/tickets?page=${page}&limit=${limit}&search=${search}`);
 
 export const fetchAgent = (agentId: string) =>
     apiFetch<Agent>(`/api/agents/${agentId}`);

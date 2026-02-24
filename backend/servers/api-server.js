@@ -1,4 +1,5 @@
 import express from 'express';
+import mongoose from 'mongoose';
 import cors from 'cors';
 import jwt from 'jsonwebtoken';
 import passport from 'passport';
@@ -265,18 +266,61 @@ app.post('/api/tickets', async (req, res) => {
 app.get('/api/agents/:agentId/tickets', async (req, res) => {
   try {
     const { agentId } = req.params;
-    const tickets = await Ticket.find({ agentId }).sort({ issueDateTime: -1 });
-    res.json(tickets);
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 10;
+    const skip = (page - 1) * limit;
+    const { search = '' } = req.query;
+
+    const baseQuery = { agentId: { $regex: new RegExp(`^${agentId}$`, 'i') } };
+    const query = { ...baseQuery };
+    if (search && search.trim()) {
+      query.ticketId = { $regex: search.trim(), $options: 'i' };
+    }
+
+    const [total, tickets, resolvedTickets] = await Promise.all([
+      Ticket.countDocuments(query),
+      Ticket.find(query).sort({ issueDateTime: -1 }).skip(skip).limit(limit),
+      Ticket.find({ ...baseQuery, status: 'RESOLVED' })
+    ]);
+
+    const totalResolved = resolvedTickets.length;
+    const totalHandleTime = resolvedTickets.reduce((acc, t) => acc + ((t.resolvedAt || 0) - (t.startedAt || 0)), 0);
+    const avgHandleTime = totalResolved > 0 ? Math.floor(totalHandleTime / totalResolved / 1000) : 0;
+
+    res.json({
+      tickets: tickets || [],
+      total: total || 0,
+      pages: Math.ceil((total || 0) / limit),
+      currentPage: page,
+      stats: {
+        totalResolved,
+        avgHandleTime
+      }
+    });
   } catch (err) {
-    console.error('[API] GET /api/agents/:agentId/tickets failed', err);
+    console.error('[API] Agent Tickets Error:', err);
     res.status(500).json({ error: 'INTERNAL_ERROR' });
   }
 });
 
 app.get('/api/tickets', async (req, res) => {
   try {
-    const tickets = await Ticket.find({}).sort({ issueDateTime: -1 });
-    res.json(tickets);
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 10;
+    const skip = (page - 1) * limit;
+
+    const total = await Ticket.countDocuments({});
+    const tickets = await Ticket.find({})
+      .sort({ issueDateTime: -1 })
+      .skip(skip)
+      .limit(limit);
+
+    res.json({
+      tickets,
+      total,
+      pages: Math.ceil(total / limit),
+      currentPage: page
+    });
   } catch (err) {
     console.error('[API] GET /api/tickets failed', err);
     res.status(500).json({ error: 'INTERNAL_ERROR' });
@@ -288,10 +332,11 @@ app.patch('/api/tickets/:ticketId', async (req, res) => {
     const { ticketId } = req.params;
     const updates = req.body || {};
 
-    const result = await Ticket.updateOne(
-      { ticketId },
-      { $set: updates }
-    );
+    const query = mongoose.Types.ObjectId.isValid(ticketId)
+      ? { $or: [{ _id: ticketId }, { ticketId: ticketId }] }
+      : { ticketId };
+
+    const result = await Ticket.updateOne(query, { $set: updates });
 
     if (!result.matchedCount) {
       return res.status(404).json({ error: 'NOT_FOUND' });

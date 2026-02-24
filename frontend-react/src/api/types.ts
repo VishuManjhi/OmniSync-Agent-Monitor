@@ -34,6 +34,7 @@ export interface Attachment {
 }
 
 export interface Ticket {
+    _id: string;
     ticketId: string;
     agentId: string;
     issueType: string;
@@ -61,4 +62,14 @@ export interface QueueStats {
     activeAgents: number;
     slaPercent: number;
     avgHandleTime?: number;
+}
+export interface PaginatedTickets {
+    tickets: Ticket[];
+    total: number;
+    pages: number;
+    currentPage: number;
+    stats?: {
+        totalResolved: number;
+        avgHandleTime: number;
+    };
 }

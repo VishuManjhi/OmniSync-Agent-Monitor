@@ -6,6 +6,8 @@ import Login from './components/Login';
 import SupervisorDashboard from './components/SupervisorDashboard';
 import AgentDashboard from './components/AgentDashboard';
 import ProtectedRoute from './components/ProtectedRoute';
+import { NotificationProvider } from './context/NotificationContext';
+import NotificationContainer from './components/ui/Notification';
 
 // Helper component to handle initial landing and role-based redirect
 const HomeRedirect: React.FC = () => {
@@ -25,37 +27,40 @@ const HomeRedirect: React.FC = () => {
 
 const App: React.FC = () => {
   return (
-    <BrowserRouter>
-      <div className="aurora-bg" />
-      <Routes>
-        <Route path="/login" element={<Login />} />
+    <NotificationProvider>
+      <BrowserRouter>
+        <div className="aurora-bg" />
+        <NotificationContainer />
+        <Routes>
+          <Route path="/login" element={<Login />} />
 
-        <Route
-          path="/supervisor"
-          element={
-            <ProtectedRoute role="supervisor">
-              <WebSocketProvider>
-                <SupervisorDashboard />
-              </WebSocketProvider>
-            </ProtectedRoute>
-          }
-        />
+          <Route
+            path="/supervisor"
+            element={
+              <ProtectedRoute role="supervisor">
+                <WebSocketProvider>
+                  <SupervisorDashboard />
+                </WebSocketProvider>
+              </ProtectedRoute>
+            }
+          />
 
-        <Route
-          path="/agent"
-          element={
-            <ProtectedRoute role="agent">
-              <WebSocketProvider>
-                <AgentDashboard />
-              </WebSocketProvider>
-            </ProtectedRoute>
-          }
-        />
+          <Route
+            path="/agent"
+            element={
+              <ProtectedRoute role="agent">
+                <WebSocketProvider>
+                  <AgentDashboard />
+                </WebSocketProvider>
+              </ProtectedRoute>
+            }
+          />
 
-        <Route path="/" element={<HomeRedirect />} />
-        <Route path="*" element={<Navigate to="/" replace />} />
-      </Routes>
-    </BrowserRouter>
+          <Route path="/" element={<HomeRedirect />} />
+          <Route path="*" element={<Navigate to="/" replace />} />
+        </Routes>
+      </BrowserRouter>
+    </NotificationProvider>
   );
 };
 
