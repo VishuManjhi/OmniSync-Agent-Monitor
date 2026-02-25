@@ -74,3 +74,20 @@ export interface PaginatedTickets {
         avgHandleTime: number;
     };
 }
+export interface Message {
+    _id: string;
+    senderId: string;
+    receiverId?: string;
+    content: string;
+    type: 'BROADCAST' | 'HELP_REQUEST' | 'CHAT';
+    timestamp: number;
+    isRead: boolean;
+    createdAt?: string;
+}
+
+export interface Broadcast {
+    id: string;
+    senderId: string;
+    content: string;
+    timestamp: number;
+}

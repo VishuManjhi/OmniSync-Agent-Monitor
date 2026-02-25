@@ -29,6 +29,8 @@ import {
 } from 'lucide-react';
 import { useDebounce } from '../hooks/useDebounce';
 import { useNotification } from '../context/NotificationContext';
+import BroadcastBanner from './messaging/BroadcastBanner';
+import HelpChatWidget from './messaging/HelpChatWidget';
 
 const AgentDashboard: React.FC = () => {
     const { user, logout } = useAuth();
@@ -174,7 +176,7 @@ const AgentDashboard: React.FC = () => {
     // will be logged out upon their next data refresh.
     useEffect(() => {
         if (!isLoadingAgent && agent?.forceLoggedOut) {
-            console.log('[Agent] Detected force-logged out status on agent profile. Logging out...');
+            console.log('[Agent] Detected force-logged out status on agent profile. Logging out');
             showNotification('You were force logged out by supervisor', 'warning', 'SESSION TERMINATED');
             logout();
         }
@@ -224,11 +226,11 @@ const AgentDashboard: React.FC = () => {
         if (!user) return;
         const status = deriveStatus(session || null);
         if (status === 'OFFLINE') {
-            showNotification('YOU ARE ALREADY OFFLINE.', 'info', 'SYSTEM REJECT');
+            showNotification('You are already offline.', 'info', 'System Reject');
             return;
         }
         if (status === 'ON_BREAK') {
-            showNotification('PLEASE END YOUR BREAK BEFORE CLOCKING OUT.', 'warning', 'SYSTEM REJECT');
+            showNotification('Please end your break before clocking out.', 'warning', 'System Reject');
             return;
         }
         const updated = { ...session!, clockOutTime: Date.now() };
@@ -239,7 +241,7 @@ const AgentDashboard: React.FC = () => {
         if (!user) return;
         const status = deriveStatus(session || null);
         if (status === 'OFFLINE') {
-            showNotification('BREAK PROTOCOL CANNOT BE INITIATED WHILE OFFLINE. PLEASE CLOCK IN.', 'error', 'PROTOCOL ERROR');
+            showNotification('Break Protocol cannot be initiated when offline. Please Clock-in.', 'error', 'Protocol Error');
             return;
         }
         const updated = { ...session!, breaks: [...(session?.breaks || [])] };
@@ -258,11 +260,11 @@ const AgentDashboard: React.FC = () => {
         if (!user) return;
         const status = deriveStatus(session || null);
         if (status === 'OFFLINE') {
-            showNotification('CALL PROTOCOL CANNOT BE INITIATED WHILE OFFLINE. PLEASE CLOCK IN.', 'error', 'PROTOCOL ERROR');
+            showNotification('Call Protocol cannot be initiated when offline. Please Clock-in.', 'error', 'Protocol Error');
             return;
         }
         if (status === 'ON_BREAK') {
-            showNotification('CALL PROTOCOL CANNOT BE INITIATED WHILE ON BREAK. PLEASE END BREAK FIRST.', 'warning', 'PROTOCOL ERROR');
+            showNotification('Call Protocol cannot be initiated when offline. Please end your break before clocking in.', 'warning', '  Protocol Error');
             return;
         }
         const updated = { ...session!, onCall: !session!.onCall };
@@ -275,7 +277,7 @@ const AgentDashboard: React.FC = () => {
 
         const status = deriveStatus(session || null);
         if (status === 'OFFLINE') {
-            showNotification('TICKET SUBMISSION BLOCKED. YOU MUST BE CLOCKED IN TO LOG A TRANSMISSION.', 'error', 'SYSTEM ERROR');
+            showNotification('TICKET SUBMISSION BLOCKED. YOU MUST BE CLOCKED IN TO LOG A TRANSMISSION.', 'error', 'System Error');
             return;
         }
 
@@ -328,7 +330,7 @@ const AgentDashboard: React.FC = () => {
 
         const currentStatus = deriveStatus(session || null);
         if (currentStatus === 'OFFLINE') {
-            showNotification('YOU MUST CLOCK IN BEFORE INTERACTING WITH TICKETS', 'error', 'PROTOCOL ERROR');
+            showNotification('You must clock-in before interacting with tickets', 'error', 'Protocol Error');
             return;
         }
 
@@ -373,7 +375,9 @@ const AgentDashboard: React.FC = () => {
 
     return (
         <div style={styles.container}>
+            <BroadcastBanner />
             <header style={styles.header}>
+
                 <div style={styles.logoGroup}>
                     <h1 style={styles.logo}>RestroBoard</h1>
                     <div style={styles.statusIndicator}>
@@ -449,7 +453,7 @@ const AgentDashboard: React.FC = () => {
 
                         <section className="glass-card" style={styles.panelSection}>
                             <h3 style={styles.panelTitle}>
-                                <Plus size={16} /> New Transmission
+                                <Plus size={16} /> New Ticket
                             </h3>
                             <form onSubmit={handleTicketSubmit} style={styles.form}>
                                 <div style={styles.formGroup}>
@@ -468,7 +472,7 @@ const AgentDashboard: React.FC = () => {
                                     </select>
                                 </div>
                                 <div style={styles.formGroup}>
-                                    <label style={styles.label}>Log Narrative</label>
+                                    <label style={styles.label}>Log Incident</label>
                                     <textarea
                                         style={styles.textarea}
                                         value={description}
@@ -500,7 +504,7 @@ const AgentDashboard: React.FC = () => {
                                                     if (file) setAttachment(file);
                                                 }}
                                             />
-                                            <span style={styles.fileName}>{attachment ? attachment.name : 'UPLD_FILE'}</span>
+                                            <span style={styles.fileName}>{attachment ? attachment.name : 'Upload File'}</span>
                                         </div>
                                     </div>
                                 </div>
@@ -616,9 +620,11 @@ const AgentDashboard: React.FC = () => {
                     </div>
                 </div>
             </main>
+            <HelpChatWidget />
         </div>
     );
 };
+
 
 const getTicketStatusColor = (status: string) => {
     switch (status) {

@@ -18,6 +18,7 @@ import ConfirmationModal from './ui/ConfirmationModal';
 import { addToQueue } from '../api/indexedDB';
 import { useDebounce } from '../hooks/useDebounce';
 import { useNotification } from '../context/NotificationContext';
+import BroadcastCenter from './messaging/BroadcastCenter';
 
 const SupervisorDashboard: React.FC = () => {
     const { logout, user } = useAuth();
@@ -31,7 +32,8 @@ const SupervisorDashboard: React.FC = () => {
     const [searchTerm, setSearchTerm] = useState('');
     const debouncedSearchTerm = useDebounce(searchTerm, 300);
     const [statusFilter, setStatusFilter] = useState('ALL');
-    const [view, setView] = useState<'MONITOR' | 'ACTIVITY' | 'WORKSTATION'>('MONITOR');
+    const [view, setView] = useState<'MONITOR' | 'ACTIVITY' | 'WORKSTATION' | 'MESSAGING'>('MONITOR');
+
     const [activityFilter, setActivityFilter] = useState('ALL');
     const [page, setPage] = useState(1);
     const [confirmLogoutAgent, setConfirmLogoutAgent] = useState<string | null>(null);
@@ -261,7 +263,14 @@ const SupervisorDashboard: React.FC = () => {
                     >
                         WorkStation
                     </button>
+                    <button
+                        style={{ ...styles.viewTab, ...(view === 'MESSAGING' ? styles.activeViewTab : {}) }}
+                        onClick={() => setView('MESSAGING')}
+                    >
+                        Messenger
+                    </button>
                 </div>
+
 
                 {view === 'MONITOR' ? (
                     <>
@@ -476,8 +485,11 @@ const SupervisorDashboard: React.FC = () => {
                             </button>
                         </div>
                     </div>
+                ) : view === 'MESSAGING' ? (
+                    <BroadcastCenter agents={agents} />
                 ) : (
                     <div style={styles.workstationShell}>
+
                         {/* ── KPI Strip ── */}
                         <div style={styles.kpiStrip}>
                             {wsKpis.map((k, i) => (

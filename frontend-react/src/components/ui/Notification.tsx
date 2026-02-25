@@ -104,7 +104,7 @@ const styles: Record<string, React.CSSProperties> = {
     title: {
         fontSize: '0.85rem',
         fontWeight: '900',
-        textTransform: 'uppercase',
+        textTransform: 'none',
         letterSpacing: '0.05em',
         color: 'white',
     },
