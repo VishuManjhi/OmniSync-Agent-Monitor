@@ -66,7 +66,7 @@ export const styles: Record<string, React.CSSProperties> = {
     statValue: {
         fontSize: '1.25rem',
         fontWeight: '800',
-        color: 'white',
+        color: 'var(--text-primary)',
     },
     logoutBtn: {
         background: 'transparent',
@@ -105,7 +105,7 @@ export const styles: Record<string, React.CSSProperties> = {
         background: 'transparent',
         border: 'none',
         padding: '10px',
-        color: 'white',
+        color: 'var(--text-primary)',
         outline: 'none',
         fontSize: '0.8rem',
         fontWeight: '600',
@@ -336,11 +336,11 @@ export const styles: Record<string, React.CSSProperties> = {
         letterSpacing: '0.05em',
     },
     input: {
-        background: 'rgba(0,0,0,0.3)',
+        background: 'var(--bg-deep)',
         border: '1px solid var(--glass-border)',
         borderRadius: '8px',
         padding: '0.75rem',
-        color: 'white',
+        color: 'var(--text-primary)',
         fontSize: '0.9rem',
         outline: 'none',
     },
@@ -382,7 +382,7 @@ export const styles: Record<string, React.CSSProperties> = {
     detailValue: {
         fontSize: '1rem',
         fontWeight: '800',
-        color: 'white',
+        color: 'var(--text-primary)',
     },
     sectionDivider: {
         fontSize: '0.7rem',
@@ -419,7 +419,7 @@ export const styles: Record<string, React.CSSProperties> = {
     timelineTime: {
         fontSize: '0.85rem',
         fontWeight: '700',
-        color: 'white',
+        color: 'var(--text-primary)',
     },
     timelineLabel: {
         fontSize: '0.65rem',
@@ -529,7 +529,7 @@ export const styles: Record<string, React.CSSProperties> = {
     wsPanelTitle: {
         fontSize: '0.85rem',
         fontWeight: '800',
-        color: 'white',
+        color: 'var(--text-primary)',
         textTransform: 'uppercase',
         letterSpacing: '0.06em',
     },
@@ -656,7 +656,7 @@ export const styles: Record<string, React.CSSProperties> = {
     ticketRowValue: {
         fontSize: '0.8rem',
         fontWeight: '800',
-        color: 'white',
+        color: 'var(--text-primary)',
         textTransform: 'uppercase',
     },
     descriptionBox: {

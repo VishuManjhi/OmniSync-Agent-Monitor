@@ -60,11 +60,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         const { token } = await res.json();
         localStorage.setItem(TOKEN_KEY, token);
         const newUser = userFromToken(token)!;
+        console.log('[Auth] Login success:', newUser.id);
         setUser(newUser);
         return newUser;
     };
 
     const logout = () => {
+        console.log('[Auth] Logging out and clearing storage');
         localStorage.removeItem(TOKEN_KEY);
         setUser(null);
         window.location.href = '/';

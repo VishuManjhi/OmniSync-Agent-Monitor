@@ -116,7 +116,7 @@ const styles: Record<string, React.CSSProperties> = {
         flexDirection: 'row',
         width: '100vw',
         overflow: 'hidden',
-        background: 'radial-gradient(circle at center, #0a0a0a 0%, #000000 100%)',
+        background: 'var(--bg-deep)',
     },
     leftPanel: {
         flex: 0.85,
@@ -145,16 +145,16 @@ const styles: Record<string, React.CSSProperties> = {
     brandTitle: {
         fontSize: '3.5rem',
         fontWeight: '800',
-        color: '#facc15',
+        color: 'var(--accent-yellow)',
         letterSpacing: '-0.03em',
         marginBottom: '1rem',
-        background: 'linear-gradient(to bottom right, #facc15 30%, #a16207 100%)',
+        background: 'linear-gradient(to bottom right, var(--accent-yellow) 30%, #a16207 100%)',
         WebkitBackgroundClip: 'text',
         WebkitTextFillColor: 'transparent',
     },
     brandSubtitle: {
         fontSize: '1.1rem',
-        color: '#525252',
+        color: 'var(--text-secondary)',
         maxWidth: '380px',
         lineHeight: '1.6',
         fontWeight: '500',
@@ -178,12 +178,11 @@ const styles: Record<string, React.CSSProperties> = {
         flexDirection: 'column',
         gap: '2rem',
         zIndex: 10,
-        // Added card styles: Dark golden background
-        background: 'linear-gradient(135deg, #1c1905 0%, #171500 50%, #0a0a0a 100%)',
+        background: 'var(--glass-bg)',
         padding: '3rem',
         borderRadius: '24px',
-        border: '1px solid rgba(250, 204, 21, 0.15)',
-        boxShadow: '0 20px 40px rgba(0,0,0,0.6)',
+        border: '1px solid var(--glass-border)',
+        boxShadow: 'var(--shadow-premium)',
     },
     header: {
         textAlign: 'left',
@@ -192,15 +191,15 @@ const styles: Record<string, React.CSSProperties> = {
     title: {
         fontSize: '2rem',
         fontWeight: '700',
-        color: '#facc15',
+        color: 'var(--accent-yellow)',
         letterSpacing: '-0.02em',
         marginBottom: '0.5rem',
-        background: 'linear-gradient(to bottom right, #facc15 30%, #a16207 100%)',
+        background: 'linear-gradient(to bottom right, var(--accent-yellow) 30%, #a16207 100%)',
         WebkitBackgroundClip: 'text',
         WebkitTextFillColor: 'transparent',
     },
     subtitle: {
-        color: '#737373', // Lightened slightly for better contrast on dark bg
+        color: 'var(--text-secondary)',
         fontSize: '0.95rem',
         fontWeight: '400',
     },
@@ -217,7 +216,7 @@ const styles: Record<string, React.CSSProperties> = {
     label: {
         fontSize: '0.8rem',
         fontWeight: '600',
-        color: '#a1a1aa', // Lightened for better visibility
+        color: 'var(--text-muted)',
         marginLeft: '4px',
         textTransform: 'uppercase',
         letterSpacing: '0.05em',
@@ -235,11 +234,11 @@ const styles: Record<string, React.CSSProperties> = {
     },
     input: {
         width: '100%',
-        background: 'rgba(0, 0, 0, 0.3)', // Darker input bg
-        border: '1px solid rgba(255, 255, 255, 0.1)',
+        background: 'var(--bg-deep)',
+        border: '1px solid var(--glass-border)',
         padding: '1.1rem 1.1rem 1.1rem 3rem',
         borderRadius: '14px',
-        color: '#ffffff',
+        color: 'var(--text-primary)',
         outline: 'none',
         transition: 'all 0.2s cubic-bezier(0.4, 0, 0.2, 1)',
         fontSize: '0.95rem',

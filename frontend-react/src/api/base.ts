@@ -15,7 +15,7 @@ export async function apiFetch<T>(path: string, options: RequestInit = {}): Prom
     });
 
     if (res.status === 401) {
-        // Token missing or expired — clear and redirect to login
+        console.warn('[API] 401 Unauthorized - Clearing token and redirecting');
         localStorage.removeItem(TOKEN_KEY);
         window.location.href = '/';
         throw new Error('SESSION_EXPIRED');

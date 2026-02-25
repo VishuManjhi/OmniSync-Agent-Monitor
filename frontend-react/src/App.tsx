@@ -13,10 +13,13 @@ const HomeRedirect: React.FC = () => {
   const navigate = useNavigate();
 
   useEffect(() => {
-    if (!isAuthenticated) {
-      navigate('/login');
-    } else {
-      navigate(user?.role === 'supervisor' ? '/supervisor' : '/agent');
+    const target = isAuthenticated
+      ? (user?.role === 'supervisor' ? '/supervisor' : '/agent')
+      : '/login';
+
+    if (window.location.pathname !== target) {
+      console.log(`[Router] Redirecting to ${target} (Auth: ${isAuthenticated})`);
+      navigate(target);
     }
   }, [isAuthenticated, user, navigate]);
 

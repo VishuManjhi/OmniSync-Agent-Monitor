@@ -4,7 +4,8 @@ import { useWebSocket } from '../context/SocketContext';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { fetchAgents, fetchSessions, fetchQueueStats, updateTicket, forceLogout, createTicket, fetchTickets } from '../api/agent';
 import type { Agent, Ticket } from '../api/types';
-import { Users, Phone, Clock, Activity, LogOut, Search, Eye, Plus, AlertTriangle, Coffee } from 'lucide-react';
+import { LogOut, Search, Plus, Phone, Activity, Clock, Users, Coffee, AlertTriangle, Eye } from 'lucide-react';
+import BroadcastBanner from './messaging/BroadcastBanner';
 
 // Modular Components
 import { styles } from './dashboard/dashboardStyles';
@@ -19,6 +20,7 @@ import { addToQueue } from '../api/indexedDB';
 import { useDebounce } from '../hooks/useDebounce';
 import { useNotification } from '../context/NotificationContext';
 import BroadcastCenter from './messaging/BroadcastCenter';
+import ThemeToggle from './ui/ThemeToggle';
 
 const SupervisorDashboard: React.FC = () => {
     const { logout, user } = useAuth();
@@ -59,8 +61,8 @@ const SupervisorDashboard: React.FC = () => {
     });
 
     const { data: activityData, isLoading: isLoadingActivity } = useQuery({
-        queryKey: ['all-tickets', page],
-        queryFn: () => fetchTickets(page, 10),
+        queryKey: ['all-tickets', page, debouncedSearchTerm, activityFilter],
+        queryFn: () => fetchTickets(page, 10, debouncedSearchTerm, activityFilter),
         enabled: !!user?.id
     });
 
@@ -128,6 +130,11 @@ const SupervisorDashboard: React.FC = () => {
         }
     }, [lastMessage, queryClient]);
 
+    // Reset page to 1 when search term or filter changes
+    useEffect(() => {
+        setPage(1);
+    }, [debouncedSearchTerm, activityFilter]);
+
     const handleForceLogout = (agentId: string) => {
         setConfirmLogoutAgent(agentId);
     };
@@ -158,17 +165,19 @@ const SupervisorDashboard: React.FC = () => {
     const wsOnCallCount = sessions.filter(s => !s.clockOutTime && s.onCall).length;
     const wsActiveCount = sessions.filter(s => !s.clockOutTime).length - wsOnBreakCount - wsOnCallCount;
     const wsOfflineCount = agents.length - sessions.filter(s => !s.clockOutTime).length;
-    const wsResolvedCount = activity.filter(t => t.status === 'RESOLVED').length;
-    const wsRejectedCount = activity.filter(t => t.status === 'REJECTED').length;
-    const wsOpenCount = activity.filter(t => t.status === 'OPEN' || t.status === 'ASSIGNED').length;
-    const wsPendingCount = activity.filter(t => t.status === 'RESOLUTION_REQUESTED').length;
-    const wsResolutionRate = activity.length > 0 ? Math.round((wsResolvedCount / activity.length) * 100) : 0;
+
+    // Use global stats from backend for ticket analytics, fallback to 0
+    const wsResolvedCount = stats?.resolvedCount ?? 0;
+    const wsRejectedCount = stats?.rejectedCount ?? 0;
+    const wsPendingCount = stats?.pendingCount ?? 0; // Unsolved/Pending
+    const wsApprovalCount = stats?.approvalCount ?? 0; // Awaiting Approval
+    const wsResolutionRate = stats?.slaPercent ?? 0;
 
     const wsKpis = [
         { label: 'Total Agents', value: agents.length, icon: <Users size={20} />, color: '#facc15', bg: 'rgba(250,204,21,0.1)' },
         { label: 'Active Now', value: wsActiveCount, icon: <Activity size={20} />, color: '#34d399', bg: 'rgba(52,211,153,0.1)' },
         { label: 'On Break', value: wsOnBreakCount, icon: <Coffee size={20} />, color: '#fb923c', bg: 'rgba(251,146,60,0.1)' },
-        { label: 'Tickets Open', value: wsOpenCount + wsPendingCount, icon: <AlertTriangle size={20} />, color: '#f472b6', bg: 'rgba(244,114,182,0.1)' },
+        { label: 'Awaiting Action', value: wsApprovalCount, icon: <AlertTriangle size={20} />, color: '#f472b6', bg: 'rgba(244,114,182,0.1)' },
         { label: 'AHT', value: currentAHT, icon: <Clock size={20} />, color: '#60a5fa', bg: 'rgba(96,165,250,0.1)' },
     ];
 
@@ -178,6 +187,7 @@ const SupervisorDashboard: React.FC = () => {
 
     return (
         <div style={styles.dashboard}>
+            <BroadcastBanner />
             {/* Header / Command Info */}
             <header style={styles.header}>
                 <div style={styles.logoGroup}>
@@ -219,9 +229,9 @@ const SupervisorDashboard: React.FC = () => {
                         <Search size={18} color="var(--text-muted)" />
                         <input
                             type="text"
-                            placeholder="SEARCH AGENTS..."
+                            placeholder="SEARCH AGENTS OR TICKETS..."
                             value={searchTerm}
-                            onChange={(e) => setSearchTerm(e.target.value.toUpperCase())}
+                            onChange={(e) => setSearchTerm(e.target.value)}
                             style={styles.searchInput}
                         />
                     </div>
@@ -402,30 +412,8 @@ const SupervisorDashboard: React.FC = () => {
                                         <th style={styles.th}>Action</th>
                                     </tr>
                                 </thead>
-                                <tbody>
+                                <tbody style={{ opacity: isLoadingActivity ? 0.5 : 1, transition: 'opacity 0.2s' }}>
                                     {activity
-                                        .filter(ticket => {
-                                            const agent = agents.find(a => a.agentId === ticket.agentId);
-                                            const search = debouncedSearchTerm.toUpperCase();
-                                            const matchesSearch = !debouncedSearchTerm ||
-                                                ticket.ticketId.toUpperCase().includes(search) ||
-                                                (ticket.displayId && ticket.displayId.toUpperCase().includes(search)) ||
-                                                ticket.agentId.toUpperCase().includes(search) ||
-                                                (agent && agent.name.toUpperCase().includes(search));
-
-                                            const isPriority = (Date.now() - ticket.issueDateTime) > 86400000 && ticket.status !== 'RESOLVED' && ticket.status !== 'REJECTED';
-
-                                            let matchesFilter = true;
-                                            if (activityFilter === 'ACTIVE') {
-                                                matchesFilter = ticket.status !== 'RESOLVED' && ticket.status !== 'REJECTED';
-                                            } else if (activityFilter === 'RESOLVED') {
-                                                matchesFilter = ticket.status === 'RESOLVED' || ticket.status === 'REJECTED';
-                                            } else if (activityFilter === 'PRIORITY') {
-                                                matchesFilter = isPriority;
-                                            }
-
-                                            return matchesSearch && matchesFilter;
-                                        })
                                         .map(ticket => {
                                             const agent = agents.find(a => a.agentId === ticket.agentId);
                                             const isPriority = (Date.now() - ticket.issueDateTime) > 86400000 && ticket.status !== 'RESOLVED' && ticket.status !== 'REJECTED';
@@ -543,11 +531,11 @@ const SupervisorDashboard: React.FC = () => {
                                 </div>
                                 <div style={styles.ticketStatGrid}>
                                     {[
-                                        { label: 'Total Tickets', count: activity.length, color: '#facc15' },
+                                        { label: 'Total Tickets', count: stats?.totalCount || 0, color: '#facc15' },
                                         { label: 'Total Resolved', count: wsResolvedCount, color: '#34d399' },
-                                        { label: 'Total Pending', count: wsPendingCount, color: '#fb923c' },
+                                        { label: 'Pending (Unsolved)', count: wsPendingCount, color: '#fb923c' },
                                         { label: 'Total Rejected', count: wsRejectedCount, color: '#ef4444' },
-                                        { label: 'Total Open', count: wsOpenCount, color: '#60a5fa' },
+                                        { label: 'Awaiting Approval', count: wsApprovalCount, color: '#60a5fa' },
                                         { label: 'Res. Rate', count: `${wsResolutionRate}%`, color: '#a78bfa' },
                                     ].map(s => (
                                         <div key={s.label} style={styles.ticketStatItem}>
@@ -615,6 +603,8 @@ const SupervisorDashboard: React.FC = () => {
                 onConfirm={executeForceLogout}
                 onCancel={() => setConfirmLogoutAgent(null)}
             />
+
+            <ThemeToggle />
         </div>
     );
 };

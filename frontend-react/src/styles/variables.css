@@ -1,18 +1,16 @@
 :root {
-  /* Premium Palette */
+  /* Premium Palette - Dark (Default) */
   --bg-deep: #050505;
   --bg-card: #0f0f0f;
   --accent-yellow: #facc15;
-  /* Vibrant Yellow */
   --accent-blue: #3b82f6;
-  /* Royal Blue */
   --accent-error: #ef4444;
 
   /* Glassmorphism Refined */
   --glass-bg: rgba(20, 20, 20, 0.7);
   --glass-border: rgba(250, 204, 21, 0.1);
-  /* Subtle yellow border */
   --glass-blur: blur(25px);
+  --glass-highlight: rgba(255, 255, 255, 0.05);
 
   /* Text */
   --text-primary: #ffffff;
@@ -25,11 +23,14 @@
 }
 
 [data-theme="light"] {
-  --bg-deep: #f8fafc;
-  --bg-accent: #f1f5f9;
-  --glass-bg: rgba(255, 255, 255, 0.6);
-  --glass-border: rgba(0, 0, 0, 0.1);
+  --bg-deep: #f1f5f9;
+  --bg-card: #ffffff;
+  --glass-bg: rgba(255, 255, 255, 0.7);
+  --glass-border: rgba(148, 163, 184, 0.2);
   --text-primary: #0f172a;
   --text-secondary: #475569;
   --text-muted: #64748b;
+  --glass-highlight: rgba(0, 0, 0, 0.02);
+  --shadow-premium: 0 10px 30px rgba(0, 0, 0, 0.05), 0 0 1px rgba(0, 0, 0, 0.1);
+  --aura-glow: radial-gradient(circle at 50% 50%, rgba(59, 130, 246, 0.03), transparent 70%);
 }

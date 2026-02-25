@@ -54,13 +54,13 @@ export const CreateTicketModal: React.FC<{
                             {isDropdownOpen && filteredAgents.length > 0 && (
                                 <div style={{
                                     position: 'absolute', top: '100%', left: 0, right: 0,
-                                    background: '#1a1a1a', border: '1px solid var(--glass-border)',
+                                    background: 'var(--bg-card)', border: '1px solid var(--glass-border)',
                                     borderRadius: '8px', zIndex: 10, maxHeight: '150px', overflowY: 'auto'
                                 }}>
                                     {filteredAgents.map(a => (
                                         <div
                                             key={a.agentId}
-                                            style={{ padding: '8px 12px', cursor: 'pointer', borderBottom: '1px solid #222' }}
+                                            style={{ padding: '8px 12px', cursor: 'pointer', borderBottom: '1px solid var(--glass-border)' }}
                                             onClick={() => handleAgentSelect(a)}
                                         >
                                             {a.name} ({a.agentId})

@@ -21,8 +21,8 @@ export const AgentCard: React.FC<{
     const cardStyle: React.CSSProperties = {
         ...styles.agentCard,
         border: `1px solid ${palette.border}`,
-        background: `linear-gradient(145deg, ${palette.glow} 0%, rgba(255,255,255,0.03) 100%)`,
-        boxShadow: `0 0 18px ${palette.glow}, inset 0 1px 0 rgba(255,255,255,0.06)`,
+        background: `linear-gradient(145deg, ${palette.glow} 0%, var(--glass-highlight) 100%)`,
+        boxShadow: `0 0 18px ${palette.glow}, inset 0 1px 0 var(--glass-highlight)`,
         position: 'relative',
         overflow: 'hidden',
     };

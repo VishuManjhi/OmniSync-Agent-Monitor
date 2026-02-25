@@ -1,13 +1,14 @@
 import { apiFetch } from './base';
-import type { Agent, AgentSession, Ticket, QueueStats, PaginatedTickets } from './types';
+import type { Agent, AgentSession, Ticket, QueueStats, PaginatedTickets, Message } from './types';
 
 export const fetchAgents = () => apiFetch<Agent[]>('/api/agents');
 export const fetchSessions = () => apiFetch<AgentSession[]>('/api/agent-sessions');
-export const fetchTickets = (page = 1, limit = 10) =>
-    apiFetch<PaginatedTickets>(`/api/tickets?page=${page}&limit=${limit}`);
+export const fetchTickets = (page = 1, limit = 10, search = '', status = 'ALL') =>
+    apiFetch<PaginatedTickets>(`/api/tickets?page=${page}&limit=${limit}&search=${search}&status=${status}`);
 export const fetchQueueStats = () => apiFetch<QueueStats>('/api/queue-stats');
 export const fetchSupervisorActivity = (supervisorId: string) =>
     apiFetch<Ticket[]>(`/api/supervisors/${supervisorId}/activity`);
+export const fetchBroadcasts = () => apiFetch<Message[]>('/api/broadcasts');
 
 export const forceLogout = (agentId: string) =>
     apiFetch(`/api/agents/${agentId}/force-logout`, { method: 'POST' });

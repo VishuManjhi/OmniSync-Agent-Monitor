@@ -1,5 +1,6 @@
 import { Server } from 'socket.io';
 import http from 'http';
+import crypto from 'crypto';
 import { connectDb } from '../db.js';
 import Message from '../models/Message.js';
 
@@ -40,23 +41,29 @@ io.on('connection', (socket) => {
         if (data.type === 'ADMIN_BROADCAST') {
             // Persist broadcast
             try {
+                const broadcastId = data.id || crypto.randomUUID();
+                console.log(`[WS] Persisting broadcast ${broadcastId} from ${data.senderId}`);
+
                 const msg = new Message({
+                    _id: broadcastId,
                     senderId: data.senderId,
                     content: data.content,
                     type: 'BROADCAST',
                     timestamp: Date.now()
                 });
                 await msg.save();
+                console.log(`[WS] Broadcast ${broadcastId} saved to database`);
+
                 // Emit to EVERYONE
                 io.emit('message', { ...data, id: msg._id });
             } catch (err) {
-                console.error('[WS] Broadcast failed:', err);
+                console.error('[WS] Broadcast failed to save:', err);
             }
         } else if (data.type === 'HELP_REQUEST' || data.type === 'CHAT_MESSAGE') {
             // Persist private message
             try {
                 const msg = new Message({
-                    _id: data.id, // Use client-provided ID for sync if present
+                    _id: data.id || crypto.randomUUID(), // Use client-provided ID for sync if present
                     senderId: data.senderId,
                     receiverId: data.receiverId,
                     content: data.content,

@@ -63,6 +63,12 @@ export interface QueueStats {
     activeAgents: number;
     slaPercent: number;
     avgHandleTime?: number;
+    resolvedCount?: number;
+    rejectedCount?: number;
+    pendingCount?: number;
+    approvalCount?: number;
+    openCount?: number;
+    totalCount?: number;
 }
 export interface PaginatedTickets {
     tickets: Ticket[];

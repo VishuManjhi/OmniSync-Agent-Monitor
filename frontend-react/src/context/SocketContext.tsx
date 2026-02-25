@@ -12,6 +12,14 @@ interface WebSocketContextType {
 
 const WebSocketContext = createContext<WebSocketContextType | undefined>(undefined);
 
+export const useWebSocket = () => {
+    const context = useContext(WebSocketContext);
+    if (context === undefined) {
+        throw new Error('useWebSocket must be used within a WebSocketProvider');
+    }
+    return context;
+};
+
 export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
     const { user } = useAuth();
     const [isConnected, setIsConnected] = useState(false);
@@ -93,10 +101,3 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     );
 };
 
-export const useWebSocket = () => {
-    const context = useContext(WebSocketContext);
-    if (context === undefined) {
-        throw new Error('useWebSocket must be used within a WebSocketProvider');
-    }
-    return context;
-};

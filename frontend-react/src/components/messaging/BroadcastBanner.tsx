@@ -1,13 +1,26 @@
 import React from 'react';
 import { useMessaging } from '../../context/MessagingContext';
+import { useAuth } from '../../context/AuthContext';
 import { Megaphone, X } from 'lucide-react';
 
 const BroadcastBanner: React.FC = () => {
+    const { user } = useAuth();
     const { broadcasts, clearBroadcast } = useMessaging();
 
     if (broadcasts.length === 0) return null;
 
-    const latest = broadcasts[0];
+    // Filter out:
+    // 1. Broadcasts sent by ME
+    // 2. Broadcasts older than 24 hours
+    const ONE_DAY = 24 * 60 * 60 * 1000;
+    const activeBroadcasts = broadcasts.filter(b =>
+        b.senderId !== user?.id &&
+        (Date.now() - b.timestamp) < ONE_DAY
+    );
+
+    if (activeBroadcasts.length === 0) return null;
+
+    const latest = activeBroadcasts[0];
 
     return (
         <div style={styles.banner} className="broadcast-banner glass-card animate-slide-down">

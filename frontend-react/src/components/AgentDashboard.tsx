@@ -31,6 +31,7 @@ import { useDebounce } from '../hooks/useDebounce';
 import { useNotification } from '../context/NotificationContext';
 import BroadcastBanner from './messaging/BroadcastBanner';
 import HelpChatWidget from './messaging/HelpChatWidget';
+import ThemeToggle from './ui/ThemeToggle';
 
 const AgentDashboard: React.FC = () => {
     const { user, logout } = useAuth();
@@ -290,6 +291,7 @@ const AgentDashboard: React.FC = () => {
                 description,
                 status: 'IN_PROGRESS',
                 issueDateTime: Date.now(),
+                startedAt: Date.now(), // Set startedAt immediately for manual tickets
                 callDuration: Number(callDuration) || null,
                 attachments: []
             };
@@ -374,7 +376,7 @@ const AgentDashboard: React.FC = () => {
     const currentStatus = deriveStatus(session || null);
 
     return (
-        <div style={styles.container}>
+        <div style={styles.container} className="dashboard-container">
             <BroadcastBanner />
             <header style={styles.header}>
 
@@ -436,14 +438,14 @@ const AgentDashboard: React.FC = () => {
                                 </button>
                                 <button
                                     onClick={handleBreakToggle}
-                                    style={{ ...styles.opBtn, color: currentStatus === 'ON_BREAK' ? 'var(--accent-yellow)' : 'white' }}
+                                    style={{ ...styles.opBtn, color: currentStatus === 'ON_BREAK' ? 'var(--accent-yellow)' : 'var(--text-primary)' }}
                                     className="hover-glow"
                                 >
                                     <Coffee size={16} /> {currentStatus === 'ON_BREAK' ? 'End Break' : 'Start Break'}
                                 </button>
                                 <button
                                     onClick={handleOnCallToggle}
-                                    style={{ ...styles.opBtn, color: currentStatus === 'ON_CALL' ? 'var(--accent-blue)' : 'white' }}
+                                    style={{ ...styles.opBtn, color: currentStatus === 'ON_CALL' ? 'var(--accent-blue)' : 'var(--text-primary)' }}
                                     className="hover-glow"
                                 >
                                     <Phone size={16} /> {currentStatus === 'ON_CALL' ? 'End Call' : 'Start Call'}
@@ -525,9 +527,9 @@ const AgentDashboard: React.FC = () => {
                                     <Search size={14} color="var(--text-muted)" />
                                     <input
                                         style={styles.searchInput}
-                                        placeholder="SEARCH BY ID..."
+                                        placeholder="SEARCH TICKETS..."
                                         value={searchTerm}
-                                        onChange={(e) => setSearchTerm(e.target.value.toUpperCase())}
+                                        onChange={(e) => setSearchTerm(e.target.value)}
                                     />
                                 </div>
                             </div>
@@ -621,6 +623,7 @@ const AgentDashboard: React.FC = () => {
                 </div>
             </main>
             <HelpChatWidget />
+            <ThemeToggle position={{ bottom: '24px', left: '24px', right: 'auto' }} />
         </div>
     );
 };
@@ -671,7 +674,7 @@ const styles: Record<string, React.CSSProperties> = {
         display: 'flex',
         justifyContent: 'space-between',
         alignItems: 'center',
-        background: 'rgba(255,255,255,0.02)',
+        background: 'var(--glass-bg)',
         padding: '1rem 1.5rem',
         borderRadius: '16px',
         border: '1px solid var(--glass-border)',
@@ -723,7 +726,7 @@ const styles: Record<string, React.CSSProperties> = {
     name: {
         fontSize: '1.2rem',
         fontWeight: '800',
-        color: 'white',
+        color: 'var(--text-primary)',
     },
     exitBtn: {
         background: 'rgba(239, 68, 68, 0.1)',
@@ -755,7 +758,7 @@ const styles: Record<string, React.CSSProperties> = {
         display: 'flex',
         alignItems: 'center',
         gap: '1rem',
-        background: 'rgba(255,255,255,0.03)',
+        background: 'var(--bg-card)',
         transition: 'all 0.3s ease',
         borderRadius: '12px',
     },
@@ -824,9 +827,9 @@ const styles: Record<string, React.CSSProperties> = {
     opBtn: {
         padding: '1rem',
         borderRadius: '12px',
-        background: 'rgba(255,255,255,0.03)',
+        background: 'var(--bg-card)',
         border: '1px solid var(--glass-border)',
-        color: 'white',
+        color: 'var(--text-primary)',
         fontWeight: '800',
         fontSize: '0.85rem',
         cursor: 'pointer',
@@ -854,19 +857,19 @@ const styles: Record<string, React.CSSProperties> = {
         paddingLeft: '4px',
     },
     select: {
-        background: 'rgba(0,0,0,0.2)',
+        background: 'var(--bg-deep)',
         border: '1px solid var(--glass-border)',
         padding: '0.85rem',
         borderRadius: '10px',
-        color: 'white',
+        color: 'var(--text-primary)',
         fontSize: '0.9rem',
     },
     textarea: {
-        background: 'rgba(0,0,0,0.2)',
+        background: 'var(--bg-deep)',
         border: '1px solid var(--glass-border)',
         padding: '1rem',
         borderRadius: '10px',
-        color: 'white',
+        color: 'var(--text-primary)',
         minHeight: '120px',
         fontSize: '0.9rem',
         resize: 'none',
@@ -877,11 +880,11 @@ const styles: Record<string, React.CSSProperties> = {
         gap: '1rem',
     },
     input: {
-        background: 'rgba(0,0,0,0.2)',
+        background: 'var(--bg-deep)',
         border: '1px solid var(--glass-border)',
         padding: '0.85rem',
         borderRadius: '10px',
-        color: 'white',
+        color: 'var(--text-primary)',
     },
     fileInputWrapper: {
         height: '45px',
@@ -932,7 +935,7 @@ const styles: Record<string, React.CSSProperties> = {
     searchWrapper: {
         display: 'flex',
         alignItems: 'center',
-        background: 'rgba(0,0,0,0.2)',
+        background: 'var(--bg-deep)',
         border: '1px solid var(--glass-border)',
         padding: '8px 12px',
         borderRadius: '8px',
@@ -941,7 +944,7 @@ const styles: Record<string, React.CSSProperties> = {
     searchInput: {
         background: 'transparent',
         border: 'none',
-        color: 'white',
+        color: 'var(--text-primary)',
         outline: 'none',
         fontSize: '0.75rem',
         fontWeight: '700',
@@ -986,8 +989,8 @@ const styles: Record<string, React.CSSProperties> = {
     ticketType: {
         fontSize: '0.7rem',
         fontWeight: '900',
-        color: 'white',
-        background: 'rgba(255,255,255,0.05)',
+        color: 'var(--text-primary)',
+        background: 'var(--glass-highlight)',
         padding: '2px 10px',
         borderRadius: '6px',
     },
@@ -1061,10 +1064,10 @@ const styles: Record<string, React.CSSProperties> = {
     },
     pageBtn: {
         padding: '6px 16px',
-        background: 'rgba(255,255,255,0.03)',
+        background: 'var(--bg-card)',
         border: '1px solid var(--glass-border)',
         borderRadius: '6px',
-        color: 'white',
+        color: 'var(--text-primary)',
         fontSize: '0.75rem',
         fontWeight: '800',
         cursor: 'pointer',

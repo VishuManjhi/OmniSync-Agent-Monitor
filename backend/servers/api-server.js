@@ -11,6 +11,7 @@ import { connectDb } from '../db.js';
 import Agent from '../models/Agent.js';
 import Session from '../models/Session.js';
 import Ticket from '../models/Ticket.js';
+import Message from '../models/Message.js';
 import passportConfig from '../passport.js';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'omnisync_super_secret_key_2024';
@@ -270,11 +271,17 @@ app.get('/api/agents/:agentId/tickets', async (req, res) => {
     const limit = parseInt(req.query.limit) || 10;
     const skip = (page - 1) * limit;
     const { search = '' } = req.query;
-
     const baseQuery = { agentId: { $regex: new RegExp(`^${agentId}$`, 'i') } };
-    const query = { ...baseQuery };
+    let query = { ...baseQuery };
+
     if (search && search.trim()) {
-      query.ticketId = { $regex: search.trim(), $options: 'i' };
+      const searchStr = search.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const searchRegex = new RegExp(searchStr, 'i');
+      query.$or = [
+        { ticketId: searchRegex },
+        { displayId: searchRegex },
+        { description: searchRegex }
+      ];
     }
 
     const [total, tickets, resolvedTickets] = await Promise.all([
@@ -284,7 +291,13 @@ app.get('/api/agents/:agentId/tickets', async (req, res) => {
     ]);
 
     const totalResolved = resolvedTickets.length;
-    const totalHandleTime = resolvedTickets.reduce((acc, t) => acc + ((t.resolvedAt || 0) - (t.startedAt || 0)), 0);
+    const totalHandleTime = resolvedTickets.reduce((acc, t) => {
+      // Only include tickets with valid start and end times to prevent skewing
+      if (t.startedAt && t.resolvedAt && t.startedAt > 0) {
+        return acc + (t.resolvedAt - t.startedAt);
+      }
+      return acc;
+    }, 0);
     const avgHandleTime = totalResolved > 0 ? Math.floor(totalHandleTime / totalResolved / 1000) : 0;
 
     res.json({
@@ -309,8 +322,42 @@ app.get('/api/tickets', async (req, res) => {
     const limit = parseInt(req.query.limit) || 10;
     const skip = (page - 1) * limit;
 
-    const total = await Ticket.countDocuments({});
-    const tickets = await Ticket.find({})
+    const { search = '', status = 'ALL' } = req.query;
+
+    let query = {};
+    if (search && search.trim()) {
+      const searchStr = search.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const searchRegex = new RegExp(searchStr, 'i');
+
+      const matchingAgents = await Agent.find({
+        $or: [
+          { agentId: searchRegex },
+          { name: searchRegex }
+        ]
+      }).select('agentId');
+      const matchingAgentIds = matchingAgents.map(a => a.agentId);
+
+      query.$or = [
+        { ticketId: searchRegex },
+        { displayId: searchRegex },
+        { description: searchRegex },
+        { agentId: { $in: matchingAgentIds } }
+      ];
+    }
+
+    // Apply status filter
+    if (status === 'ACTIVE') {
+      query.status = { $nin: ['RESOLVED', 'REJECTED'] };
+    } else if (status === 'RESOLVED') {
+      query.status = { $in: ['RESOLVED', 'REJECTED'] };
+    } else if (status === 'PRIORITY') {
+      const oneDayAgo = Date.now() - 86400000;
+      query.status = { $nin: ['RESOLVED', 'REJECTED'] };
+      query.issueDateTime = { $lt: oneDayAgo };
+    }
+
+    const total = await Ticket.countDocuments(query);
+    const tickets = await Ticket.find(query)
       .sort({ issueDateTime: -1 })
       .skip(skip)
       .limit(limit);
@@ -361,28 +408,59 @@ app.get('/api/supervisors/:supervisorId/activity', async (req, res) => {
   }
 });
 
-// Queue stats
 app.get('/api/queue-stats', async (req, res) => {
   try {
-    const [waitingCalls, activeAgentsResult, slaResolved, totalTickets] = await Promise.all([
+    const [waitingCalls, activeAgentsResult, resolvedCount, totalTickets, rejectedCount, approvalCount, pendingCount] = await Promise.all([
       Ticket.countDocuments({ status: { $in: ['OPEN', 'IN_PROGRESS', 'ASSIGNED', 'RESOLUTION_REQUESTED'] } }),
       Session.distinct('agentId', { clockOutTime: null }),
       Ticket.countDocuments({ status: 'RESOLVED' }),
-      Ticket.countDocuments({})
+      Ticket.countDocuments({}),
+      Ticket.countDocuments({ status: 'REJECTED' }),
+      Ticket.countDocuments({ status: 'RESOLUTION_REQUESTED' }), // Awaiting Approval
+      Ticket.countDocuments({ status: { $in: ['OPEN', 'ASSIGNED', 'IN_PROGRESS'] } }) // Unsolved/Pending
     ]);
 
     const activeAgents = activeAgentsResult.length;
-    const slaPercent = totalTickets ? Math.round((slaResolved / totalTickets) * 100) : 0;
+    const slaPercent = totalTickets ? Math.round((resolvedCount / totalTickets) * 100) : 0;
+
+    // Calculate global AHT for all resolved tickets
+    const resolvedTickets = await Ticket.find({ status: 'RESOLVED' });
+    const totalHandleTime = resolvedTickets.reduce((acc, t) => {
+      if (t.startedAt && t.resolvedAt && t.startedAt > 0) {
+        return acc + (t.resolvedAt - t.startedAt);
+      }
+      return acc;
+    }, 0);
+    const avgHandleTime = resolvedCount > 0 ? Math.floor(totalHandleTime / resolvedCount / 1000) : 0;
 
     res.json({
       timestamp: Date.now(),
       queueDepth: waitingCalls,
       waitingCalls,
       activeAgents,
-      slaPercent
+      slaPercent,
+      avgHandleTime,
+      resolvedCount,
+      rejectedCount,
+      approvalCount,
+      pendingCount,
+      totalCount: totalTickets
     });
   } catch (err) {
     console.error('[API] GET /api/queue-stats failed', err);
+    res.status(500).json({ error: 'INTERNAL_ERROR' });
+  }
+});
+
+// Broadcast History
+app.get('/api/broadcasts', async (req, res) => {
+  try {
+    const broadcasts = await Message.find({ type: 'BROADCAST' })
+      .sort({ timestamp: -1 })
+      .limit(10);
+    res.json(broadcasts);
+  } catch (err) {
+    console.error('[API] GET /api/broadcasts failed', err);
     res.status(500).json({ error: 'INTERNAL_ERROR' });
   }
 });

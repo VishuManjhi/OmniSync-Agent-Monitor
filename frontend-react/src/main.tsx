@@ -7,6 +7,7 @@ import { AuthProvider } from './context/AuthContext'
 import { NotificationProvider } from './context/NotificationContext'
 import { WebSocketProvider } from './context/SocketContext'
 import { MessagingProvider } from './context/MessagingContext'
+import { ThemeProvider } from './context/ThemeContext'
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -21,15 +22,16 @@ createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <QueryClientProvider client={queryClient}>
       <AuthProvider>
-        <NotificationProvider>
-          <WebSocketProvider>
-            <MessagingProvider>
-              <App />
-            </MessagingProvider>
-          </WebSocketProvider>
-        </NotificationProvider>
+        <ThemeProvider>
+          <NotificationProvider>
+            <WebSocketProvider>
+              <MessagingProvider>
+                <App />
+              </MessagingProvider>
+            </WebSocketProvider>
+          </NotificationProvider>
+        </ThemeProvider>
       </AuthProvider>
     </QueryClientProvider>
   </StrictMode>,
 )
-
