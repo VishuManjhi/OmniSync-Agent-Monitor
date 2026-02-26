@@ -6,7 +6,7 @@
 [![MongoDB](https://img.shields.io/badge/MongoDB-Mongoose-47A248?style=for-the-badge&logo=mongodb)](https://www.mongodb.com/)
 [![Socket.IO](https://img.shields.io/badge/Socket.IO-Real--Time-white?style=for-the-badge&logo=socketdotio)](https://socket.io/)
 
-<<<<<<< HEAD
+
 **OmniSync Agent Monitor** is a production-grade, real-time dashboard designed for high-stakes call center environments. It bridges the gap between workforce monitoring and instant collaboration, providing supervisors with bird's-eye visibility and agents with immediate support channels.
 =======
 **OmniSync Agent Monitor** (RestroBoard) is a production-grade, real-time dashboard designed for high-stakes call center environments. It bridges the gap between workforce monitoring and instant collaboration, providing supervisors with bird's-eye visibility and agents with immediate support channels.
