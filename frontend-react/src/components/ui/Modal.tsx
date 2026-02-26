@@ -14,9 +14,16 @@ const Modal: React.FC<{
     <div className="fixed inset-0 z-50 flex items-center justify-center">
       <div className="fixed inset-0 bg-black/60" onClick={() => onOpenChange(false)} />
 
-      <div className="z-50 w-full max-w-xl bg-gray-900 rounded-lg p-6 shadow-lg">
-        {title && <div className="text-lg font-bold text-yellow-400 mb-3">{title}</div>}
-        <div className="text-sm text-gray-100">{children}</div>
+      <div
+        className="z-50 w-full max-w-xl rounded-lg p-6"
+        style={{
+          background: 'var(--bg-card)',
+          border: '1px solid var(--glass-border)',
+          boxShadow: 'var(--shadow-premium)'
+        }}
+      >
+        {title && <div className="text-lg font-bold mb-3" style={{ color: 'var(--accent-yellow)' }}>{title}</div>}
+        <div className="text-sm" style={{ color: 'var(--text-primary)' }}>{children}</div>
         {footer && <div className="mt-4 flex justify-end">{footer}</div>}
       </div>
     </div>

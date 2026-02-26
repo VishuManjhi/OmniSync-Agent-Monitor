@@ -2,9 +2,9 @@ import React, { useEffect, useState } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { useWebSocket } from '../context/SocketContext';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { fetchAgents, fetchSessions, fetchQueueStats, updateTicket, forceLogout, createTicket, fetchTickets } from '../api/agent';
-import type { Agent, Ticket } from '../api/types';
-import { LogOut, Search, Plus, Phone, Activity, Clock, Users, Coffee, AlertTriangle, Eye } from 'lucide-react';
+import { fetchAgents, fetchSessions, fetchQueueStats, updateTicket, forceLogout, createTicket, fetchTickets, fetchAgentTickets } from '../api/agent';
+import type { Agent, AgentSession, Ticket } from '../api/types';
+import { Search, Plus, Phone, Activity, Clock, Users, Coffee, AlertTriangle, Eye } from 'lucide-react';
 import BroadcastBanner from './messaging/BroadcastBanner';
 
 // Modular Components
@@ -13,7 +13,6 @@ import { StatCard } from './dashboard/StatCard';
 import { AgentCard } from './dashboard/AgentCard';
 import { TicketModal } from './dashboard/TicketModal';
 import { CreateTicketModal } from './dashboard/CreateTicketModal';
-import { AgentDetailsModal } from './dashboard/AgentDetailsModal';
 import { deriveAgentStatus } from './dashboard/utils';
 import ConfirmationModal from './ui/ConfirmationModal';
 import { addToQueue } from '../api/indexedDB';
@@ -21,6 +20,11 @@ import { useDebounce } from '../hooks/useDebounce';
 import { useNotification } from '../context/NotificationContext';
 import BroadcastCenter from './messaging/BroadcastCenter';
 import ThemeToggle from './ui/ThemeToggle';
+import SupervisorSideNav from './dashboard/supervisor/SupervisorSideNav';
+import { styles as agentStyles } from './dashboard/agent/agentDashboardStyles';
+import { SupervisorStatusPie, SupervisorTicketsBar } from './dashboard/supervisor/SupervisorCharts';
+import AgentTicketsDrawer from './dashboard/supervisor/AgentTicketsDrawer';
+import ReportCentre from './dashboard/supervisor/ReportCentre';
 
 const SupervisorDashboard: React.FC = () => {
     const { logout, user } = useAuth();
@@ -29,12 +33,13 @@ const SupervisorDashboard: React.FC = () => {
     const { showNotification } = useNotification();
 
     const [selectedTicket, setSelectedTicket] = useState<Ticket | null>(null);
-    const [selectedAgent, setSelectedAgent] = useState<Agent | null>(null);
+    const [selectedAgentDrawer, setSelectedAgentDrawer] = useState<Agent | null>(null);
+    const [agentTicketsPage, setAgentTicketsPage] = useState(1);
     const [showCreateTicket, setShowCreateTicket] = useState(false);
     const [searchTerm, setSearchTerm] = useState('');
     const debouncedSearchTerm = useDebounce(searchTerm, 300);
     const [statusFilter, setStatusFilter] = useState('ALL');
-    const [view, setView] = useState<'MONITOR' | 'ACTIVITY' | 'WORKSTATION' | 'MESSAGING'>('MONITOR');
+    const [view, setView] = useState<'MONITOR' | 'AGENTS' | 'REPORTS' | 'ACTIVITY' | 'WORKSTATION' | 'MESSAGING'>('MONITOR');
 
     const [activityFilter, setActivityFilter] = useState('ALL');
     const [page, setPage] = useState(1);
@@ -64,6 +69,12 @@ const SupervisorDashboard: React.FC = () => {
         queryKey: ['all-tickets', page, debouncedSearchTerm, activityFilter],
         queryFn: () => fetchTickets(page, 10, debouncedSearchTerm, activityFilter),
         enabled: !!user?.id
+    });
+
+    const { data: agentTicketsData, isLoading: isLoadingAgentTickets } = useQuery({
+        queryKey: ['agent-tickets', selectedAgentDrawer?.agentId, agentTicketsPage],
+        queryFn: () => fetchAgentTickets(selectedAgentDrawer!.agentId, agentTicketsPage, 5, '', 'ALL'),
+        enabled: !!selectedAgentDrawer?.agentId
     });
 
     const activity = activityData?.tickets || [];
@@ -135,6 +146,10 @@ const SupervisorDashboard: React.FC = () => {
         setPage(1);
     }, [debouncedSearchTerm, activityFilter]);
 
+    useEffect(() => {
+        setAgentTicketsPage(1);
+    }, [selectedAgentDrawer?.agentId]);
+
     const handleForceLogout = (agentId: string) => {
         setConfirmLogoutAgent(agentId);
     };
@@ -172,6 +187,15 @@ const SupervisorDashboard: React.FC = () => {
     const wsPendingCount = stats?.pendingCount ?? 0; // Unsolved/Pending
     const wsApprovalCount = stats?.approvalCount ?? 0; // Awaiting Approval
     const wsResolutionRate = stats?.slaPercent ?? 0;
+    const recentlyRaisedUnresolved = [...activity]
+        .filter(t => t.status !== 'RESOLVED' && t.status !== 'REJECTED')
+        .sort((a, b) => b.issueDateTime - a.issueDateTime)
+        .slice(0, 10);
+    const agentTickets = agentTicketsData?.tickets || [];
+    const agentTicketsPages = agentTicketsData?.pages || 1;
+    const selectedAgentSession: AgentSession | undefined = selectedAgentDrawer
+        ? sessions.find(s => s.agentId === selectedAgentDrawer.agentId)
+        : undefined;
 
     const wsKpis = [
         { label: 'Total Agents', value: agents.length, icon: <Users size={20} />, color: '#facc15', bg: 'rgba(250,204,21,0.1)' },
@@ -185,45 +209,59 @@ const SupervisorDashboard: React.FC = () => {
         return <div style={{ color: 'white', padding: '2rem' }}>LOADING BOOT SEQUENCE...</div>;
     }
 
+    const viewTitleMap: Record<'MONITOR' | 'AGENTS' | 'REPORTS' | 'ACTIVITY' | 'WORKSTATION' | 'MESSAGING', string> = {
+        MONITOR: 'Dashboard',
+        AGENTS: 'Agents',
+        REPORTS: 'Report Centre',
+        ACTIVITY: 'Activity Log',
+        WORKSTATION: 'Workstation',
+        MESSAGING: 'Messaging'
+    };
+
     return (
-        <div style={styles.dashboard}>
-            <BroadcastBanner />
-            {/* Header / Command Info */}
-            <header style={styles.header}>
-                <div style={styles.logoGroup}>
-                    <h1 style={styles.logo}>RestroBoard</h1>
-                    <span style={styles.badge}>Live Terminal</span>
-                </div>
+        <div style={agentStyles.appLayout}>
+            <SupervisorSideNav
+                activeView={view}
+                setActiveView={setView}
+                supervisorId={user?.id}
+                logout={logout}
+            />
 
-                <div style={styles.statsRow}>
-                    <StatCard
-                        icon={<Users size={20} color="var(--accent-yellow)" />}
-                        label="Staff"
-                        value={stats?.activeAgents || 0}
-                    />
-                    <StatCard
-                        icon={<Phone size={20} color="var(--accent-blue)" />}
-                        label="Queue"
-                        value={stats?.waitingCalls || 0}
-                    />
-                    <StatCard
-                        icon={<Activity size={20} color="#10b981" />}
-                        label="SLA"
-                        value={`${stats?.slaPercent || 0}%`}
-                    />
-                    <StatCard
-                        icon={<Clock size={20} color="var(--accent-yellow)" />}
-                        label="AHT"
-                        value={currentAHT}
-                    />
-                </div>
+            <main style={agentStyles.mainContainer}>
+                <header style={agentStyles.topHeader}>
+                    <div style={agentStyles.headerTitle}>
+                        <h1 style={agentStyles.viewTitle}>{viewTitleMap[view]}</h1>
+                        <span style={agentStyles.breadcrumb}>RestroBoard / Supervisor / Control Room</span>
+                    </div>
+                    <div style={styles.statsRow}>
+                        <StatCard
+                            icon={<Users size={20} color="var(--accent-yellow)" />}
+                            label="Staff"
+                            value={stats?.activeAgents || 0}
+                        />
+                        <StatCard
+                            icon={<Phone size={20} color="var(--accent-blue)" />}
+                            label="Queue"
+                            value={stats?.waitingCalls || 0}
+                        />
+                        <StatCard
+                            icon={<Activity size={20} color="#10b981" />}
+                            label="SLA"
+                            value={`${stats?.slaPercent || 0}%`}
+                        />
+                        <StatCard
+                            icon={<Clock size={20} color="var(--accent-yellow)" />}
+                            label="AHT"
+                            value={currentAHT}
+                        />
+                    </div>
+                </header>
 
-                <button onClick={logout} style={styles.logoutBtn}>
-                    <LogOut size={18} /> Exit
-                </button>
-            </header>
+                <BroadcastBanner />
 
-            <main style={styles.main}>
+                <div style={agentStyles.viewContent}>
+                    <div style={styles.main}>
+                {view !== 'REPORTS' && view !== 'MESSAGING' && (
                 <div style={styles.controlBar}>
                     <div style={styles.searchBox}>
                         <Search size={18} color="var(--text-muted)" />
@@ -253,37 +291,111 @@ const SupervisorDashboard: React.FC = () => {
                         </button>
                     </div>
                 </div>
-
-                <div style={styles.viewTabs}>
-                    <button
-                        style={{ ...styles.viewTab, ...(view === 'MONITOR' ? styles.activeViewTab : {}) }}
-                        onClick={() => setView('MONITOR')}
-                    >
-                        Live Monitor
-                    </button>
-                    <button
-                        style={{ ...styles.viewTab, ...(view === 'ACTIVITY' ? styles.activeViewTab : {}) }}
-                        onClick={() => setView('ACTIVITY')}
-                    >
-                        Activity Log
-                    </button>
-                    <button
-                        style={{ ...styles.viewTab, ...(view === 'WORKSTATION' ? styles.activeViewTab : {}) }}
-                        onClick={() => setView('WORKSTATION')}
-                    >
-                        WorkStation
-                    </button>
-                    <button
-                        style={{ ...styles.viewTab, ...(view === 'MESSAGING' ? styles.activeViewTab : {}) }}
-                        onClick={() => setView('MESSAGING')}
-                    >
-                        Messenger
-                    </button>
-                </div>
-
+                )}
 
                 {view === 'MONITOR' ? (
                     <>
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
+                            <section className="glass-card" style={{ ...styles.sectionCard, marginBottom: '0' }}>
+                                <div style={styles.sectionHeader}>
+                                    <div style={styles.sectionIndicator} />
+                                    <h2 style={styles.sectionTitle}>Agent Status Distribution</h2>
+                                </div>
+                                <SupervisorStatusPie
+                                    onCall={wsOnCallCount}
+                                    onBreak={wsOnBreakCount}
+                                    offline={wsOfflineCount}
+                                />
+                            </section>
+
+                            <section className="glass-card" style={{ ...styles.sectionCard, marginBottom: '0' }}>
+                                <div style={styles.sectionHeader}>
+                                    <div style={styles.sectionIndicator} />
+                                    <h2 style={styles.sectionTitle}>Tickets Raised vs Resolved</h2>
+                                </div>
+                                <SupervisorTicketsBar
+                                    raised={stats?.totalCount || 0}
+                                    resolved={wsResolvedCount}
+                                />
+                            </section>
+                        </div>
+
+                        <div className="glass-card" style={styles.recentTicketsSection}>
+                            <div style={styles.sectionHeader}>
+                                <div style={styles.sectionIndicator} />
+                                <h2 style={styles.sectionTitle}>Recent Unresolved / Approval Tickets</h2>
+                            </div>
+
+                            <div style={styles.scrollContainer}>
+                                {recentlyRaisedUnresolved.map(ticket => (
+                                    <div key={ticket.ticketId} style={styles.ticketDetailCard} onClick={() => setSelectedTicket(ticket)}>
+                                        <div style={styles.ticketCardHeader}>
+                                            <span style={styles.ticketIdText}>{ticket.displayId || `#${ticket.ticketId.substring(0, 8).toUpperCase()}`}</span>
+                                            <span style={{
+                                                ...styles.statusBadge,
+                                                background: 'rgba(168, 85, 247, 0.2)',
+                                                color: '#a855f7',
+                                                border: '1px solid rgba(168, 85, 247, 0.3)',
+                                                padding: '4px 12px',
+                                                borderRadius: '8px',
+                                                fontSize: '0.65rem',
+                                                fontWeight: '800'
+                                            }}>
+                                                {ticket.status}
+                                            </span>
+                                        </div>
+
+                                        <div style={styles.ticketCardRow}>
+                                            <span style={styles.ticketRowLabel}>Agent</span>
+                                            <span style={styles.ticketRowValue}>{ticket.agentId}</span>
+                                        </div>
+                                        <div style={styles.ticketCardRow}>
+                                            <span style={styles.ticketRowLabel}>Issue</span>
+                                            <span style={styles.ticketRowValue}>{ticket.issueType}</span>
+                                        </div>
+
+                                        <div style={styles.descriptionBox}>
+                                            {ticket.description}
+                                        </div>
+
+                                        <div style={styles.ticketCardFooter}>
+                                            <span style={styles.raisedAt}>
+                                                Raised at {new Date(ticket.issueDateTime).toLocaleString()}
+                                            </span>
+                                        </div>
+
+                                        <div style={styles.ticketActions}>
+                                            {(ticket.status === 'RESOLUTION_REQUESTED' && ticket.assignedBy === 'SUPERVISOR') && (
+                                                <>
+                                                    <button
+                                                        style={styles.approveBtn}
+                                                        onClick={(e) => { e.stopPropagation(); setSelectedTicket(ticket); }}
+                                                    >
+                                                        APPROVE
+                                                    </button>
+                                                    <button
+                                                        style={styles.rejectCardBtn}
+                                                        onClick={(e) => { e.stopPropagation(); setSelectedTicket(ticket); }}
+                                                    >
+                                                        REJECT
+                                                    </button>
+                                                </>
+                                            )}
+                                        </div>
+                                    </div>
+                                ))}
+                                {recentlyRaisedUnresolved.length === 0 && (
+                                    <div style={styles.emptyText}>NO UNRESOLVED TICKETS AVAILABLE</div>
+                                )}
+                            </div>
+                        </div>
+                    </>
+                ) : view === 'AGENTS' ? (
+                    <div className="glass-card" style={{ ...styles.sectionCard }}>
+                        <div style={styles.sectionHeader}>
+                            <div style={styles.sectionIndicator} />
+                            <h2 style={styles.sectionTitle}>All Agents</h2>
+                        </div>
                         <div style={styles.gridWrapper}>
                             <div style={styles.grid}>
                                 {agents
@@ -302,88 +414,14 @@ const SupervisorDashboard: React.FC = () => {
                                             cardIndex={idx}
                                             session={sessions.find(s => s.agentId === agent.agentId)}
                                             onForceLogout={handleForceLogout}
-                                            onClick={() => setSelectedAgent(agent)}
+                                            onClick={() => setSelectedAgentDrawer(agent)}
                                         />
-                                    ))
-                                }
+                                    ))}
                             </div>
                         </div>
-
-                        {/* Recent Tickets Section */}
-                        <div className="glass-card" style={styles.recentTicketsSection}>
-                            <div style={styles.sectionHeader}>
-                                <div style={styles.sectionIndicator} />
-                                <h2 style={styles.sectionTitle}>Recent Tickets</h2>
-                            </div>
-
-                            <div style={styles.scrollContainer}>
-                                {activity
-                                    .sort((a, b) => b.issueDateTime - a.issueDateTime)
-                                    .slice(0, 10)
-                                    .map(ticket => (
-                                        <div key={ticket.ticketId} style={styles.ticketDetailCard} onClick={() => setSelectedTicket(ticket)}>
-                                            <div style={styles.ticketCardHeader}>
-                                                <span style={styles.ticketIdText}>{ticket.displayId || `#${ticket.ticketId.substring(0, 8).toUpperCase()}`}</span>
-                                                <span style={{
-                                                    ...styles.statusBadge,
-                                                    background: 'rgba(168, 85, 247, 0.2)',
-                                                    color: '#a855f7',
-                                                    border: '1px solid rgba(168, 85, 247, 0.3)',
-                                                    padding: '4px 12px',
-                                                    borderRadius: '8px',
-                                                    fontSize: '0.65rem',
-                                                    fontWeight: '800'
-                                                }}>
-                                                    {ticket.status}
-                                                </span>
-                                            </div>
-
-                                            <div style={styles.ticketCardRow}>
-                                                <span style={styles.ticketRowLabel}>Agent</span>
-                                                <span style={styles.ticketRowValue}>{ticket.agentId}</span>
-                                            </div>
-                                            <div style={styles.ticketCardRow}>
-                                                <span style={styles.ticketRowLabel}>Issue</span>
-                                                <span style={styles.ticketRowValue}>{ticket.issueType}</span>
-                                            </div>
-
-                                            <div style={styles.descriptionBox}>
-                                                {ticket.description}
-                                            </div>
-
-                                            <div style={styles.ticketCardFooter}>
-                                                <span style={styles.raisedAt}>
-                                                    Raised at {new Date(ticket.issueDateTime).toLocaleString()}
-                                                </span>
-                                            </div>
-
-                                            <div style={styles.ticketActions}>
-                                                {(ticket.status === 'RESOLUTION_REQUESTED' || ticket.status === 'OPEN') && (
-                                                    <>
-                                                        <button
-                                                            style={styles.approveBtn}
-                                                            onClick={(e) => { e.stopPropagation(); setSelectedTicket(ticket); }}
-                                                        >
-                                                            APPROVE
-                                                        </button>
-                                                        <button
-                                                            style={styles.rejectCardBtn}
-                                                            onClick={(e) => { e.stopPropagation(); setSelectedTicket(ticket); }}
-                                                        >
-                                                            REJECT
-                                                        </button>
-                                                    </>
-                                                )}
-                                            </div>
-                                        </div>
-                                    ))
-                                }
-                                {activity.length === 0 && (
-                                    <div style={styles.emptyText}>NO RECENT TICKETS AVAILABLE</div>
-                                )}
-                            </div>
-                        </div>
-                    </>
+                    </div>
+                ) : view === 'REPORTS' ? (
+                    <ReportCentre agents={agents} sessions={sessions} />
                 ) : view === 'ACTIVITY' ? (
                     <div className="glass-card" style={styles.activityLog}>
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
@@ -548,6 +586,8 @@ const SupervisorDashboard: React.FC = () => {
                         </div>
                     </div>
                 )}
+                    </div>
+                </div>
             </main>
 
             {selectedTicket && (
@@ -558,7 +598,9 @@ const SupervisorDashboard: React.FC = () => {
                         updateTicketMutation.mutate({ ticketId: selectedTicket.ticketId, updates });
                     }}
                     onReject={(reason: string) => {
-                        const updates = { status: 'REJECTED' as const, rejectionReason: reason, rejectedAt: Date.now() };
+                        const updates = selectedTicket.assignedBy === 'SUPERVISOR'
+                            ? { status: 'IN_PROGRESS' as const, rejectionReason: reason }
+                            : { status: 'REJECTED' as const, rejectionReason: reason, rejectedAt: Date.now() };
                         updateTicketMutation.mutate({ ticketId: selectedTicket.ticketId, updates });
                     }}
                     isLoading={updateTicketMutation.isPending}
@@ -576,6 +618,7 @@ const SupervisorDashboard: React.FC = () => {
                             displayId: `${ticketData.issueType}-${ticketData.agentId || 'QUEUE'}-${Math.floor(100 + Math.random() * 899)}`.toUpperCase(),
                             issueDateTime: Date.now(),
                             status: (ticketData.agentId ? 'ASSIGNED' : 'OPEN') as Ticket['status'],
+                            assignedBy: ticketData.agentId ? 'SUPERVISOR' : 'SYSTEM',
                             createdBy: user?.id,
                             attachments: []
                         };
@@ -585,13 +628,19 @@ const SupervisorDashboard: React.FC = () => {
                 />
             )}
 
-            {selectedAgent && (
-                <AgentDetailsModal
-                    agent={selectedAgent}
-                    session={sessions.find(s => s.agentId === selectedAgent.agentId)}
-                    onClose={() => setSelectedAgent(null)}
-                />
-            )}
+            <AgentTicketsDrawer
+                open={!!selectedAgentDrawer}
+                agent={selectedAgentDrawer}
+                session={selectedAgentSession}
+                tickets={agentTickets}
+                page={agentTicketsPage}
+                totalPages={agentTicketsPages}
+                isLoading={isLoadingAgentTickets}
+                onClose={() => setSelectedAgentDrawer(null)}
+                onPrev={() => setAgentTicketsPage(p => Math.max(1, p - 1))}
+                onNext={() => setAgentTicketsPage(p => Math.min(agentTicketsPages, p + 1))}
+                onTicketClick={(ticket) => setSelectedTicket(ticket)}
+            />
 
             <ConfirmationModal
                 isOpen={!!confirmLogoutAgent}

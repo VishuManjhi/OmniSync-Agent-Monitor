@@ -1,471 +1,107 @@
 import express from 'express';
-import mongoose from 'mongoose';
 import cors from 'cors';
-import jwt from 'jsonwebtoken';
 import passport from 'passport';
-import multer from 'multer';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import fs from 'fs';
+import helmet from 'helmet';
+import rateLimit from 'express-rate-limit';
+import hpp from 'hpp';
 import { connectDb } from '../db.js';
-import Agent from '../models/Agent.js';
-import Session from '../models/Session.js';
-import Ticket from '../models/Ticket.js';
-import Message from '../models/Message.js';
 import passportConfig from '../passport.js';
 
-const JWT_SECRET = process.env.JWT_SECRET || 'omnisync_super_secret_key_2024';
-const JWT_EXPIRES = '8h';
+// Route Imports
+import authRoutes from '../routes/authRoutes.js';
+import agentRoutes from '../routes/agentRoutes.js';
+import sessionRoutes from '../routes/sessionRoutes.js';
+import ticketRoutes from '../routes/ticketRoutes.js';
+import analyticsRoutes from '../routes/analyticsRoutes.js';
+import supervisorRoutes from '../routes/supervisorRoutes.js';
+import broadcastRoutes from '../routes/broadcastRoutes.js';
+import fileRoutes from '../routes/fileRoutes.js';
+
+// Middleware Imports
+import errorHandler from '../middleware/errorHandler.js';
 
 const app = express();
+
+// ── ENVIRONMENT VALIDATION ──
+const JWT_SECRET = process.env.JWT_SECRET;
 const PORT = process.env.PORT || 3003;
 
-app.use(cors());
-app.use(express.json({ limit: '10mb' }));
+if (!JWT_SECRET && process.env.NODE_ENV === 'production') {
+  console.error('[FATAL] JWT_SECRET is not defined in production environment!');
+  process.exit(1);
+}
+
+// ── SECURITY MIDDLEWARE ──
+// Use Helmet for secure headers
+app.use(helmet({
+  crossOriginResourcePolicy: { policy: "cross-origin" } // Allow images from uploads to be loaded on frontend
+}));
+
+// Standard Rate Limiting
+const limiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 100, // Limit each IP to 100 requests per windowMs
+  message: { error: 'TOO_MANY_REQUESTS', message: 'Too many requests from this IP, please try again after 15 minutes' },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+// Apply rate limiter to all routes
+app.use('/api/', limiter);
+
+// Prevent HTTP Parameter Pollution
+app.use(hpp());
+
+// ── BASIC SETUP ──
+// TODO: Replace wildcard with specific production origin whitelist
+app.use(cors({
+  origin: process.env.ALLOWED_ORIGINS ? process.env.ALLOWED_ORIGINS.split(',') : '*',
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization']
+}));
+app.use(express.json({ limit: '5mb' })); // Reduced limit from 10mb for better protection
 
 // Setup __dirname for ES modules
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// Ensure uploads directory exists
-const uploadsDir = path.join(__dirname, '..', 'uploads');
-if (!fs.existsSync(uploadsDir)) {
-  fs.mkdirSync(uploadsDir, { recursive: true });
-}
-
 // Serve uploads folder statically
+const uploadsDir = path.join(__dirname, '..', 'uploads');
 app.use('/uploads', express.static(uploadsDir));
 
-// Multer Config
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => {
-    cb(null, uploadsDir);
-  },
-  filename: (req, file, cb) => {
-    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1e9);
-    cb(null, uniqueSuffix + '-' + file.originalname);
-  }
-});
-const upload = multer({ storage });
-
-// Initialize Passport
+// ── AUTHENTICATION ──
 passportConfig(passport);
 app.use(passport.initialize());
+const authenticateToken = passport.authenticate('jwt', { session: false });
 
-// Connect to DB
+// ── DATABASE ──
 connectDb().catch(err => {
   console.error('[API] Failed to connect to DB:', err);
 });
 
-// Authentication Protection Middleware
-const authenticateToken = passport.authenticate('jwt', { session: false });
-
+// ── HEALTH CHECK ──
 app.get('/health', (req, res) => {
-  res.json({ status: 'ok' });
+  res.json({ status: 'ok', timestamp: new Date() });
 });
 
-// Auth 
-app.post('/api/auth/login', async (req, res) => {
-  try {
-    const { id, password } = req.body || {};
-    if (!id || !password) {
-      return res.status(400).json({ error: 'MISSING_CREDENTIALS' });
-    }
+// ── PUBLIC ROUTES ──
+app.use('/api/auth', authRoutes);
 
-    const normalizedId = id.toLowerCase().trim();
-    const agent = await Agent.findOne({ agentId: normalizedId });
-
-    let role = null;
-    if (!agent) {
-      // Fallback for missing DB user (development default)
-      if (normalizedId.startsWith('a') && password === 'agent123') role = 'agent';
-      else if ((normalizedId === 'admin' || normalizedId.startsWith('sup')) && password === 'sup123') role = 'supervisor';
-    } else {
-      // DB user: compare password securely
-      const isMatch = await agent.comparePassword(password);
-      if (isMatch) {
-        role = agent.role;
-      } else {
-        // Fallback for legacy plain-text password check (auto-hashes on first success)
-        if (agent.password === password) {
-          role = agent.role;
-          // Update to hashed password
-          agent.password = password;
-          await agent.save();
-        } else if (!agent.password) {
-          // No password set at all → fall back to config defaults
-          if (normalizedId.startsWith('a') && password === 'agent123') role = agent.role || 'agent';
-          else if ((normalizedId === 'admin' || normalizedId.startsWith('sup')) && password === 'sup123') role = agent.role || 'supervisor';
-
-          if (role) {
-            // Set password for future secure logins
-            agent.password = password;
-            await agent.save();
-          }
-        }
-      }
-    }
-
-    if (!role) {
-      return res.status(401).json({ error: 'INVALID_CREDENTIALS' });
-    }
-
-    const payload = { id: normalizedId, role: role };
-    const token = jwt.sign(payload, JWT_SECRET, { expiresIn: JWT_EXPIRES });
-
-    // Reset forceLoggedOut flag on successful login
-    await Agent.updateOne({ agentId: normalizedId }, { $set: { forceLoggedOut: false } });
-
-    res.json({ token, id: normalizedId, role, user: payload });
-  } catch (err) {
-    console.error('[API] POST /api/auth/login failed:', err);
-    res.status(500).json({ error: 'INTERNAL_ERROR', details: err.message });
-  }
-});
-
+// ── PROTECTED ROUTES ──
 app.use('/api', authenticateToken);
+app.use('/api/agents', agentRoutes);
+app.use('/api/agent-sessions', sessionRoutes);
+app.use('/api/tickets', ticketRoutes);
+app.use('/api/queue-stats', analyticsRoutes);
+app.use('/api/supervisors', supervisorRoutes);
+app.use('/api/broadcasts', broadcastRoutes);
+app.use('/api/upload', fileRoutes);
 
-// File Upload
-app.post('/api/upload', upload.single('file'), (req, res) => {
-  try {
-    if (!req.file) {
-      return res.status(400).json({ error: 'NO_FILE_UPLOADED' });
-    }
-    const fileUrl = `/uploads/${req.file.filename}`;
-    res.json({
-      url: fileUrl,
-      filename: req.file.filename,
-      mimetype: req.file.mimetype,
-      size: req.file.size
-    });
-  } catch (err) {
-    console.error('[API] POST /api/upload failed:', err);
-    res.status(500).json({ error: 'UPLOAD_FAILED' });
-  }
-});
-
-// Agents
-app.get('/api/agents', async (req, res) => {
-  try {
-    const agents = await Agent.find({});
-    res.json(agents);
-  } catch (err) {
-    console.error('[API] GET /api/agents failed', err);
-    res.status(500).json({ error: 'INTERNAL_ERROR' });
-  }
-});
-
-app.get('/api/agents/:agentId', async (req, res) => {
-  try {
-    const { agentId } = req.params;
-    const agent = await Agent.findOne({ agentId });
-    if (!agent) return res.status(404).json({ error: 'NOT_FOUND' });
-    res.json(agent);
-  } catch (err) {
-    console.error('[API] GET /api/agents/:agentId failed', err);
-    res.status(500).json({ error: 'INTERNAL_ERROR' });
-  }
-});
-
-// Agent sessions
-app.post('/api/agent-sessions', async (req, res) => {
-  try {
-    const sessionData = req.body;
-    if (!sessionData || !sessionData.sessionID || !sessionData.agentId) {
-      return res.status(400).json({ error: 'INVALID_SESSION' });
-    }
-
-    await Session.updateOne(
-      { sessionID: sessionData.sessionID },
-      { $set: sessionData },
-      { upsert: true }
-    );
-
-    // Reset forceLoggedOut flag when agent clocks in/updates session
-    await Agent.updateOne(
-      { agentId: sessionData.agentId },
-      { $set: { forceLoggedOut: false } }
-    );
-
-    res.status(200).json({ ok: true });
-  } catch (err) {
-    console.error('[API] POST /api/agent-sessions failed', err);
-    res.status(500).json({ error: 'INTERNAL_ERROR' });
-  }
-});
-
-app.get('/api/agent-sessions', async (req, res) => {
-  try {
-    const sessions = await Session.aggregate([
-      { $sort: { updatedAt: -1 } },
-      { $group: { _id: '$agentId', latestSession: { $first: '$$ROOT' } } },
-      { $replaceRoot: { newRoot: '$latestSession' } }
-    ]);
-    res.json(sessions);
-  } catch (err) {
-    console.error('[API] GET /api/agent-sessions failed', err);
-    res.status(500).json({ error: 'INTERNAL_ERROR' });
-  }
-});
-
-app.get('/api/agents/:agentId/sessions/current', async (req, res) => {
-  try {
-    const { agentId } = req.params;
-    const session = await Session.findOne({ agentId, clockOutTime: null }).sort({ clockInTime: -1 });
-
-    if (!session) {
-      return res.status(404).json({ error: 'NOT_FOUND' });
-    }
-
-    res.json(session);
-  } catch (err) {
-    console.error('[API] GET /api/agents/:agentId/sessions/current failed', err);
-    res.status(500).json({ error: 'INTERNAL_ERROR' });
-  }
-});
-
-app.post('/api/agents/:agentId/force-logout', async (req, res) => {
-  try {
-    const { agentId } = req.params;
-    await Session.updateOne(
-      { agentId, clockOutTime: null },
-      { $set: { forceLoggedOutAt: Date.now(), clockOutTime: Date.now() } }
-    );
-    // Set flag on agent document for fallback detection
-    await Agent.updateOne(
-      { agentId },
-      { $set: { forceLoggedOut: true } }
-    );
-    res.json({ ok: true });
-  } catch (err) {
-    console.error('[API] POST /api/agents/:agentId/force-logout failed', err);
-    res.status(500).json({ error: 'INTERNAL_ERROR' });
-  }
-});
-
-// Tickets
-app.post('/api/tickets', async (req, res) => {
-  try {
-    const ticketData = req.body;
-    if (!ticketData || !ticketData.ticketId || !ticketData.agentId) {
-      return res.status(400).json({ error: 'INVALID_TICKET' });
-    }
-
-    await Ticket.updateOne(
-      { ticketId: ticketData.ticketId },
-      { $set: ticketData },
-      { upsert: true }
-    );
-
-    res.status(200).json({ ok: true });
-  } catch (err) {
-    console.error('[API] POST /api/tickets failed', err);
-    res.status(500).json({ error: 'INTERNAL_ERROR' });
-  }
-});
-
-app.get('/api/agents/:agentId/tickets', async (req, res) => {
-  try {
-    const { agentId } = req.params;
-    const page = parseInt(req.query.page) || 1;
-    const limit = parseInt(req.query.limit) || 10;
-    const skip = (page - 1) * limit;
-    const { search = '' } = req.query;
-    const baseQuery = { agentId: { $regex: new RegExp(`^${agentId}$`, 'i') } };
-    let query = { ...baseQuery };
-
-    if (search && search.trim()) {
-      const searchStr = search.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-      const searchRegex = new RegExp(searchStr, 'i');
-      query.$or = [
-        { ticketId: searchRegex },
-        { displayId: searchRegex },
-        { description: searchRegex }
-      ];
-    }
-
-    const [total, tickets, resolvedTickets] = await Promise.all([
-      Ticket.countDocuments(query),
-      Ticket.find(query).sort({ issueDateTime: -1 }).skip(skip).limit(limit),
-      Ticket.find({ ...baseQuery, status: 'RESOLVED' })
-    ]);
-
-    const totalResolved = resolvedTickets.length;
-    const totalHandleTime = resolvedTickets.reduce((acc, t) => {
-      // Only include tickets with valid start and end times to prevent skewing
-      if (t.startedAt && t.resolvedAt && t.startedAt > 0) {
-        return acc + (t.resolvedAt - t.startedAt);
-      }
-      return acc;
-    }, 0);
-    const avgHandleTime = totalResolved > 0 ? Math.floor(totalHandleTime / totalResolved / 1000) : 0;
-
-    res.json({
-      tickets: tickets || [],
-      total: total || 0,
-      pages: Math.ceil((total || 0) / limit),
-      currentPage: page,
-      stats: {
-        totalResolved,
-        avgHandleTime
-      }
-    });
-  } catch (err) {
-    console.error('[API] Agent Tickets Error:', err);
-    res.status(500).json({ error: 'INTERNAL_ERROR' });
-  }
-});
-
-app.get('/api/tickets', async (req, res) => {
-  try {
-    const page = parseInt(req.query.page) || 1;
-    const limit = parseInt(req.query.limit) || 10;
-    const skip = (page - 1) * limit;
-
-    const { search = '', status = 'ALL' } = req.query;
-
-    let query = {};
-    if (search && search.trim()) {
-      const searchStr = search.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-      const searchRegex = new RegExp(searchStr, 'i');
-
-      const matchingAgents = await Agent.find({
-        $or: [
-          { agentId: searchRegex },
-          { name: searchRegex }
-        ]
-      }).select('agentId');
-      const matchingAgentIds = matchingAgents.map(a => a.agentId);
-
-      query.$or = [
-        { ticketId: searchRegex },
-        { displayId: searchRegex },
-        { description: searchRegex },
-        { agentId: { $in: matchingAgentIds } }
-      ];
-    }
-
-    // Apply status filter
-    if (status === 'ACTIVE') {
-      query.status = { $nin: ['RESOLVED', 'REJECTED'] };
-    } else if (status === 'RESOLVED') {
-      query.status = { $in: ['RESOLVED', 'REJECTED'] };
-    } else if (status === 'PRIORITY') {
-      const oneDayAgo = Date.now() - 86400000;
-      query.status = { $nin: ['RESOLVED', 'REJECTED'] };
-      query.issueDateTime = { $lt: oneDayAgo };
-    }
-
-    const total = await Ticket.countDocuments(query);
-    const tickets = await Ticket.find(query)
-      .sort({ issueDateTime: -1 })
-      .skip(skip)
-      .limit(limit);
-
-    res.json({
-      tickets,
-      total,
-      pages: Math.ceil(total / limit),
-      currentPage: page
-    });
-  } catch (err) {
-    console.error('[API] GET /api/tickets failed', err);
-    res.status(500).json({ error: 'INTERNAL_ERROR' });
-  }
-});
-
-app.patch('/api/tickets/:ticketId', async (req, res) => {
-  try {
-    const { ticketId } = req.params;
-    const updates = req.body || {};
-
-    const query = mongoose.Types.ObjectId.isValid(ticketId)
-      ? { $or: [{ _id: ticketId }, { ticketId: ticketId }] }
-      : { ticketId };
-
-    const result = await Ticket.updateOne(query, { $set: updates });
-
-    if (!result.matchedCount) {
-      return res.status(404).json({ error: 'NOT_FOUND' });
-    }
-
-    res.json({ ok: true });
-  } catch (err) {
-    console.error('[API] PATCH /api/tickets/:ticketId failed', err);
-    res.status(500).json({ error: 'INTERNAL_ERROR' });
-  }
-});
-
-// Supervisors Activity
-app.get('/api/supervisors/:supervisorId/activity', async (req, res) => {
-  try {
-    const { supervisorId } = req.params;
-    const activity = await Ticket.find({ createdBy: supervisorId }).sort({ createdAt: -1 });
-    res.json(activity);
-  } catch (err) {
-    console.error('[API] GET /api/supervisors/:supervisorId/activity failed', err);
-    res.status(500).json({ error: 'INTERNAL_ERROR' });
-  }
-});
-
-app.get('/api/queue-stats', async (req, res) => {
-  try {
-    const [waitingCalls, activeAgentsResult, resolvedCount, totalTickets, rejectedCount, approvalCount, pendingCount] = await Promise.all([
-      Ticket.countDocuments({ status: { $in: ['OPEN', 'IN_PROGRESS', 'ASSIGNED', 'RESOLUTION_REQUESTED'] } }),
-      Session.distinct('agentId', { clockOutTime: null }),
-      Ticket.countDocuments({ status: 'RESOLVED' }),
-      Ticket.countDocuments({}),
-      Ticket.countDocuments({ status: 'REJECTED' }),
-      Ticket.countDocuments({ status: 'RESOLUTION_REQUESTED' }), // Awaiting Approval
-      Ticket.countDocuments({ status: { $in: ['OPEN', 'ASSIGNED', 'IN_PROGRESS'] } }) // Unsolved/Pending
-    ]);
-
-    const activeAgents = activeAgentsResult.length;
-    const slaPercent = totalTickets ? Math.round((resolvedCount / totalTickets) * 100) : 0;
-
-    // Calculate global AHT for all resolved tickets
-    const resolvedTickets = await Ticket.find({ status: 'RESOLVED' });
-    const totalHandleTime = resolvedTickets.reduce((acc, t) => {
-      if (t.startedAt && t.resolvedAt && t.startedAt > 0) {
-        return acc + (t.resolvedAt - t.startedAt);
-      }
-      return acc;
-    }, 0);
-    const avgHandleTime = resolvedCount > 0 ? Math.floor(totalHandleTime / resolvedCount / 1000) : 0;
-
-    res.json({
-      timestamp: Date.now(),
-      queueDepth: waitingCalls,
-      waitingCalls,
-      activeAgents,
-      slaPercent,
-      avgHandleTime,
-      resolvedCount,
-      rejectedCount,
-      approvalCount,
-      pendingCount,
-      totalCount: totalTickets
-    });
-  } catch (err) {
-    console.error('[API] GET /api/queue-stats failed', err);
-    res.status(500).json({ error: 'INTERNAL_ERROR' });
-  }
-});
-
-// Broadcast History
-app.get('/api/broadcasts', async (req, res) => {
-  try {
-    const broadcasts = await Message.find({ type: 'BROADCAST' })
-      .sort({ timestamp: -1 })
-      .limit(10);
-    res.json(broadcasts);
-  } catch (err) {
-    console.error('[API] GET /api/broadcasts failed', err);
-    res.status(500).json({ error: 'INTERNAL_ERROR' });
-  }
-});
+// ── GLOBAL ERROR HANDLER ──
+app.use(errorHandler);
 
 app.listen(PORT, () => {
-  console.log(`[API] Server listening on http://localhost:${PORT}`);
+  console.log(`[API] Modular Server listening on http://localhost:${PORT}`);
 });
-

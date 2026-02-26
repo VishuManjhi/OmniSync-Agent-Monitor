@@ -27,7 +27,7 @@ export const TicketModal: React.FC<{
         <div style={{ display: 'flex', gap: '12px', width: '100%', justifyContent: 'flex-end', paddingTop: '1rem', borderTop: '1px solid var(--glass-border)' }}>
             {!isRejecting ? (
                 <>
-                    {(ticket.status === 'RESOLUTION_REQUESTED' || ticket.status === 'OPEN' || ticket.status === 'ASSIGNED') && (
+                    {(ticket.status === 'RESOLUTION_REQUESTED' && ticket.assignedBy === 'SUPERVISOR') && (
                         <>
                             <button
                                 style={{ ...styles.resolveBtn, cursor: isLoading ? 'not-allowed' : 'pointer' }}

@@ -2,12 +2,16 @@ import mongoose from 'mongoose';
 import bcrypt from 'bcryptjs';
 
 const agentSchema = new mongoose.Schema({
-    agentId: { type: String, required: true, unique: true, index: true },
+    agentId: { type: String, required: true },
     name: { type: String, required: true },
+    email: { type: String },
     role: { type: String, enum: ['agent', 'supervisor'], default: 'agent' },
     password: { type: String }, // Hashed password
     forceLoggedOut: { type: Boolean, default: false }
 }, { timestamps: true });
+
+// ── INDEXES FOR PRODUCTION PERFORMANCE ──
+agentSchema.index({ agentId: 1 }, { unique: true });
 
 // Hash password before saving
 agentSchema.pre('save', async function () {

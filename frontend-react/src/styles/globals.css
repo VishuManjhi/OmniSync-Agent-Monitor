@@ -65,7 +65,6 @@ button {
     background: var(--glass-bg);
     backdrop-filter: var(--glass-blur);
     border: 1px solid var(--glass-border);
-    box-shadow: var(--shadow-premium);
     border-radius: 24px;
     transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
 }
@@ -73,11 +72,9 @@ button {
 /* Interaction Utilities */
 .hover-lift:hover {
     transform: translateY(-5px);
-    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
 }
 
 .hover-glow:hover {
-    box-shadow: 0 0 20px rgba(250, 204, 21, 0.15);
     border-color: var(--accent-yellow) !important;
 }
 

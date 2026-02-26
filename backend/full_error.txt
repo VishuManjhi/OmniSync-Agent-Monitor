@@ -1,0 +1,50 @@
+﻿node : file:///C:/Users
+/VishuManjhi/Desktop/VB
+A%20Final/VBA/backend/p
+assport.js:7
+At line:1 char:1
++ node 
+servers/api-server.js 
+2>&1 | Out-File 
+-FilePath 
+full_error.txt - ...
++ ~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~
+    + CategoryInfo     
+         : NotSpecifi  
+  ed: (file:///C:/Us   
+ er...d/passport.js    
+:7:String) [], Rem    
+oteException
+    + FullyQualifiedEr 
+   rorId : NativeComm  
+  andError
+ 
+    throw new 
+Error('FATAL: 
+JWT_SECRET environment 
+variable is not 
+defined!');
+          ^
+
+Error: FATAL: 
+JWT_SECRET environment 
+variable is not 
+defined!
+    at file:///C:/Users
+/VishuManjhi/Desktop/VB
+A%20Final/VBA/backend/p
+assport.js:7:11
+    at ModuleJob.run (n
+ode:internal/modules/es
+m/module_job:343:25)
+    at async onImport.t
+racePromise.__proto__ (
+node:internal/modules/e
+sm/loader:665:26)
+    at async asyncRunEn
+tryPointWithESMLoader (
+node:internal/modules/r
+un_main:117:5)
+
+Node.js v22.22.0

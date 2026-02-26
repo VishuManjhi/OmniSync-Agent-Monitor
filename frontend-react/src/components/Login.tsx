@@ -127,7 +127,7 @@ const styles: Record<string, React.CSSProperties> = {
         padding: '3rem',
         position: 'relative',
         overflow: 'hidden',
-        borderRight: '1px solid rgba(255, 255, 255, 0.03)',
+        borderRight: '1px solid var(--glass-border)',
     },
     rightPanel: {
         flex: 1,
@@ -164,7 +164,7 @@ const styles: Record<string, React.CSSProperties> = {
         width: '1000px',
         height: '1000px',
         borderRadius: '50%',
-        background: 'radial-gradient(circle, rgba(20, 20, 20, 1) 0%, transparent 60%)',
+        background: 'var(--aura-glow)',
         top: '50%',
         left: '50%',
         transform: 'translate(-50%, -50%)',
@@ -194,7 +194,7 @@ const styles: Record<string, React.CSSProperties> = {
         color: 'var(--accent-yellow)',
         letterSpacing: '-0.02em',
         marginBottom: '0.5rem',
-        background: 'linear-gradient(to bottom right, var(--accent-yellow) 30%, #a16207 100%)',
+        background: 'linear-gradient(to bottom right, var(--accent-yellow) 30%, var(--accent-blue) 120%)',
         WebkitBackgroundClip: 'text',
         WebkitTextFillColor: 'transparent',
     },
@@ -229,7 +229,7 @@ const styles: Record<string, React.CSSProperties> = {
     inputIcon: {
         position: 'absolute',
         left: '16px',
-        color: '#737373',
+        color: 'var(--text-muted)',
         transition: 'color 0.2s',
     },
     input: {
@@ -255,7 +255,7 @@ const styles: Record<string, React.CSSProperties> = {
         fontWeight: '500',
     },
     loginBtn: {
-        background: 'linear-gradient(to right, #facc15, #eab308)',
+        background: 'linear-gradient(to right, var(--accent-yellow), #eab308)',
         color: '#000000',
         border: 'none',
         padding: '1.1rem',
@@ -265,11 +265,11 @@ const styles: Record<string, React.CSSProperties> = {
         marginTop: '0.5rem',
         cursor: 'pointer',
         transition: 'all 0.2s cubic-bezier(0.4, 0, 0.2, 1)',
-        boxShadow: '0 4px 12px rgba(250, 204, 21, 0.2)',
+        boxShadow: 'var(--shadow-premium)',
     },
     footer: {
         fontSize: '0.75rem',
-        color: '#525252',
+        color: 'var(--text-muted)',
         textAlign: 'center',
         marginTop: '2rem',
         fontWeight: '500',

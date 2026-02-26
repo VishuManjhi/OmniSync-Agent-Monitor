@@ -262,7 +262,7 @@ const styles: Record<string, React.CSSProperties> = {
     sectionTitle: {
         fontSize: '0.85rem',
         fontWeight: '900',
-        color: 'white',
+        color: 'var(--text-primary)',
         letterSpacing: '0.1em',
         margin: 0,
     },
@@ -277,11 +277,11 @@ const styles: Record<string, React.CSSProperties> = {
         gap: '1rem',
     },
     broadcastInput: {
-        background: 'rgba(255,255,255,0.03)',
+        background: 'var(--bg-card)',
         border: '1px solid var(--glass-border)',
         borderRadius: '12px',
         padding: '12px',
-        color: 'white',
+        color: 'var(--text-primary)',
         fontSize: '0.9rem',
         minHeight: '120px',
         outline: 'none',
@@ -316,7 +316,7 @@ const styles: Record<string, React.CSSProperties> = {
     },
     historyItem: {
         padding: '10px',
-        background: 'rgba(255,255,255,0.02)',
+        background: 'var(--glass-highlight)',
         borderRadius: '8px',
         borderLeft: '2px solid var(--accent-yellow)',
         display: 'flex',
@@ -325,7 +325,7 @@ const styles: Record<string, React.CSSProperties> = {
     },
     historyContent: {
         fontSize: '0.8rem',
-        color: 'rgba(255,255,255,0.8)',
+        color: 'var(--text-secondary)',
     },
     historyTime: {
         fontSize: '0.6rem',

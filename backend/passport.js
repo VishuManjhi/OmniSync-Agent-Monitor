@@ -2,7 +2,10 @@ import { Strategy as JwtStrategy, ExtractJwt } from 'passport-jwt';
 import mongoose from 'mongoose';
 import Agent from './models/Agent.js';
 
-const JWT_SECRET = process.env.JWT_SECRET || 'omnisync_super_secret_key_2024';
+const JWT_SECRET = process.env.JWT_SECRET || 'vba-default-secret-change-in-prod';
+if (!process.env.JWT_SECRET) {
+    console.warn('[Passport] WARNING: JWT_SECRET environment variable is not defined. Using development fallback.');
+}
 
 const options = {
     jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),

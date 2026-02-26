@@ -42,12 +42,18 @@ const Toast: React.FC<{ notification: any; onDismiss: () => void }> = ({ notific
         }
     };
 
+    const getToastBackground = () => {
+        const theme = document.documentElement.getAttribute('data-theme');
+        return theme === 'light' ? 'rgba(255, 255, 255, 0.96)' : 'rgba(15, 23, 42, 0.88)';
+    };
+
     return (
         <div
             className={`glass-card ${isExiting ? 'exit-animation' : 'enter-animation'}`}
             style={{
                 ...styles.toast,
                 borderColor: getBorderColor(),
+                background: getToastBackground(),
                 opacity: isExiting ? 0 : 1,
                 transform: isExiting ? 'translateX(100%)' : 'translateX(0)'
             }}
@@ -106,7 +112,7 @@ const styles: Record<string, React.CSSProperties> = {
         fontWeight: '900',
         textTransform: 'none',
         letterSpacing: '0.05em',
-        color: 'white',
+        color: 'var(--text-primary)',
     },
     message: {
         fontSize: '0.85rem',
@@ -136,20 +142,23 @@ const styles: Record<string, React.CSSProperties> = {
 };
 
 // Add animations via style tag if not in CSS file
-const styleTag = document.createElement('style');
-styleTag.innerHTML = `
-    @keyframes progress {
-        from { width: 100%; }
-        to { width: 0%; }
-    }
-    .enter-animation {
-        animation: enter 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards;
-    }
-    @keyframes enter {
-        from { transform: translateX(100%); opacity: 0; }
-        to { transform: translateX(0); opacity: 1; }
-    }
-`;
-document.head.appendChild(styleTag);
+if (!document.getElementById('notification-animations')) {
+    const styleTag = document.createElement('style');
+    styleTag.id = 'notification-animations';
+    styleTag.innerHTML = `
+        @keyframes progress {
+            from { width: 100%; }
+            to { width: 0%; }
+        }
+        .enter-animation {
+            animation: enter 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards;
+        }
+        @keyframes enter {
+            from { transform: translateX(100%); opacity: 0; }
+            to { transform: translateX(0); opacity: 1; }
+        }
+    `;
+    document.head.appendChild(styleTag);
+}
 
 export default NotificationContainer;

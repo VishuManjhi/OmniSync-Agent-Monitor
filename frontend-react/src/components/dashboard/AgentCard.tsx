@@ -2,7 +2,7 @@ import React from 'react';
 import { ShieldOff, Clock } from 'lucide-react';
 import type { Agent, AgentSession } from '../../api/types';
 import { styles } from './dashboardStyles';
-import { deriveAgentStatus, CARD_GRADIENTS } from './utils';
+import { deriveAgentStatus } from './utils';
 
 export const AgentCard: React.FC<{
     agent: Agent,
@@ -10,19 +10,17 @@ export const AgentCard: React.FC<{
     cardIndex: number,
     onForceLogout: (id: string) => void,
     onClick: () => void
-}> = ({ agent, session, cardIndex, onForceLogout, onClick }) => {
+}> = ({ agent, session, cardIndex: _cardIndex, onForceLogout, onClick }) => {
     const status = deriveAgentStatus(session);
     const statusColor = status === 'OFFLINE' ? 'var(--text-muted)' :
         status === 'ON_CALL' ? 'var(--accent-blue)' :
             status === 'ON_BREAK' ? 'var(--accent-yellow)' : '#10b981';
 
-    const palette = CARD_GRADIENTS[cardIndex % CARD_GRADIENTS.length];
-
     const cardStyle: React.CSSProperties = {
         ...styles.agentCard,
-        border: `1px solid ${palette.border}`,
-        background: `linear-gradient(145deg, ${palette.glow} 0%, var(--glass-highlight) 100%)`,
-        boxShadow: `0 0 18px ${palette.glow}, inset 0 1px 0 var(--glass-highlight)`,
+        border: '1px solid var(--glass-border)',
+        background: 'var(--glass-bg)',
+        boxShadow: 'var(--shadow-premium)',
         position: 'relative',
         overflow: 'hidden',
     };
@@ -31,12 +29,12 @@ export const AgentCard: React.FC<{
         <div className="glass-card" style={cardStyle} onClick={onClick}>
             <div style={{
                 position: 'absolute', top: 0, left: 0, right: 0, height: '3px',
-                background: `linear-gradient(90deg, transparent, ${palette.accent}, transparent)`,
-                opacity: 0.8,
+                background: 'linear-gradient(90deg, transparent, var(--accent-blue), transparent)',
+                opacity: 0.35,
             }} />
             <div style={styles.agentHeader}>
                 <div style={styles.agentInfo}>
-                    <h3 style={{ ...styles.agentName, color: palette.accent }}>{agent.name}</h3>
+                    <h3 style={{ ...styles.agentName, color: 'var(--text-primary)' }}>{agent.name}</h3>
                     <span style={styles.agentId}>{agent.agentId}</span>
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>

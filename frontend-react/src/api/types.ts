@@ -3,6 +3,7 @@ export type AgentRole = 'agent' | 'supervisor';
 export interface Agent {
     agentId: string;
     name: string;
+    email?: string;
     role: AgentRole;
     forceLoggedOut?: boolean;
 }
@@ -96,4 +97,32 @@ export interface Broadcast {
     senderId: string;
     content: string;
     timestamp: number;
+}
+
+export interface AgentAnalytics {
+    ticketHistory: { day: string; raised: number; resolved: number }[];
+    sessionHistory: { day: string; onlineTimeHours: number }[];
+    breakHistory: Break[];
+    overallRatio: { totalRaised: number; totalResolved: number; totalRejected: number };
+    avgHandleTime: number;
+}
+
+export interface AgentReport {
+    period: 'weekly' | 'monthly';
+    from: number;
+    to: number;
+    agent: {
+        agentId: string;
+        name: string;
+        email: string | null;
+        status: 'ACTIVE' | 'ON_CALL' | 'ON_BREAK' | 'OFFLINE' | string;
+    };
+    metrics: {
+        totalRaised: number;
+        totalResolved: number;
+        totalRejected: number;
+        attendanceHours: number;
+        avgHandleTimeSeconds: number;
+        slaPercent: number;
+    };
 }
