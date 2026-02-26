@@ -385,7 +385,7 @@ const styles: Record<string, React.CSSProperties> = {
     agentIdName: {
         fontSize: '0.85rem',
         fontWeight: '800',
-        color: 'white',
+        color: 'var(--text-primary)',
     },
     agentSub: {
         fontSize: '0.65rem',
@@ -424,7 +424,7 @@ const styles: Record<string, React.CSSProperties> = {
     },
     bubbleText: {
         fontSize: '0.85rem',
-        color: 'rgba(255,255,255,0.9)',
+        color: 'var(--text-primary)',
         lineHeight: '1.5',
     },
     replyForm: {
@@ -434,11 +434,11 @@ const styles: Record<string, React.CSSProperties> = {
     },
     replyInput: {
         flex: 1,
-        background: 'rgba(255,255,255,0.03)',
+        background: 'var(--bg-card)',
         border: '1px solid var(--glass-border)',
         borderRadius: '10px',
         padding: '10px 14px',
-        color: 'white',
+        color: 'var(--text-primary)',
         fontSize: '0.85rem',
         outline: 'none',
     },
@@ -483,7 +483,7 @@ const styles: Record<string, React.CSSProperties> = {
     },
     targetToggle: {
         display: 'flex',
-        background: 'rgba(255,255,255,0.03)',
+        background: 'var(--glass-highlight)',
         borderRadius: '10px',
         padding: '4px',
         marginBottom: '1rem',
@@ -512,7 +512,7 @@ const styles: Record<string, React.CSSProperties> = {
     searchInputWrapper: {
         display: 'flex',
         alignItems: 'center',
-        background: 'rgba(255,255,255,0.02)',
+        background: 'var(--bg-card)',
         border: '1px solid var(--glass-border)',
         borderRadius: '8px',
         padding: '0 10px',
@@ -525,7 +525,7 @@ const styles: Record<string, React.CSSProperties> = {
         background: 'transparent',
         border: 'none',
         padding: '8px',
-        color: 'white',
+        color: 'var(--text-primary)',
         fontSize: '0.8rem',
         outline: 'none',
     },
@@ -534,14 +534,14 @@ const styles: Record<string, React.CSSProperties> = {
         top: '100%',
         left: 0,
         right: 0,
-        background: '#121214',
+        background: 'var(--bg-card)',
         border: '1px solid var(--glass-border)',
         borderRadius: '8px',
         marginTop: '4px',
         zIndex: 50,
         maxHeight: '200px',
         overflowY: 'auto',
-        boxShadow: '0 10px 25px rgba(0,0,0,0.5)',
+        boxShadow: 'var(--shadow-premium)',
     },
     searchItem: {
         padding: '10px',
@@ -549,12 +549,12 @@ const styles: Record<string, React.CSSProperties> = {
         flexDirection: 'column',
         cursor: 'pointer',
         transition: 'background 0.2s',
-        borderBottom: '1px solid rgba(255,255,255,0.05)',
+        borderBottom: '1px solid var(--glass-border)',
     },
     searchName: {
         fontSize: '0.8rem',
         fontWeight: '700',
-        color: 'white',
+        color: 'var(--text-primary)',
     },
     searchId: {
         fontSize: '0.65rem',
@@ -580,7 +580,7 @@ const styles: Record<string, React.CSSProperties> = {
         alignItems: 'center',
         gap: '8px',
         fontSize: '0.75rem',
-        color: 'rgba(255,255,255,0.9)',
+        color: 'var(--text-primary)',
     },
     clearTarget: {
         background: 'transparent',

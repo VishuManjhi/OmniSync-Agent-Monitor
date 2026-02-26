@@ -31,7 +31,7 @@ export const CreateTicketModal: React.FC<{
 
     return (
         <div style={styles.modalOverlay}>
-            <div className="glass-card" style={styles.modal}>
+            <div className="glass-card" style={{ ...styles.modal, background: 'var(--bg-card)' }}>
                 <div style={styles.modalHeader}>
                     <h3 style={styles.modalTitle}>CREATE TICKET</h3>
                     <button onClick={onClose} style={styles.iconBtn} disabled={isLoading}><X size={20} /></button>
@@ -55,12 +55,21 @@ export const CreateTicketModal: React.FC<{
                                 <div style={{
                                     position: 'absolute', top: '100%', left: 0, right: 0,
                                     background: 'var(--bg-card)', border: '1px solid var(--glass-border)',
-                                    borderRadius: '8px', zIndex: 10, maxHeight: '150px', overflowY: 'auto'
+                                    borderRadius: '8px', zIndex: 10, maxHeight: '150px', overflowY: 'auto',
+                                    boxShadow: 'var(--shadow-premium)'
                                 }}>
                                     {filteredAgents.map(a => (
                                         <div
                                             key={a.agentId}
-                                            style={{ padding: '8px 12px', cursor: 'pointer', borderBottom: '1px solid var(--glass-border)' }}
+                                            style={{
+                                                padding: '8px 12px',
+                                                cursor: 'pointer',
+                                                borderBottom: '1px solid var(--glass-border)',
+                                                color: 'var(--text-primary)',
+                                                background: 'var(--bg-card)',
+                                                fontWeight: 600,
+                                                fontSize: '0.85rem'
+                                            }}
                                             onClick={() => handleAgentSelect(a)}
                                         >
                                             {a.name} ({a.agentId})

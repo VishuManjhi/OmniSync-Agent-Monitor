@@ -4,6 +4,13 @@ import { fileURLToPath } from 'url';
 import { getDb } from './db.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const MAX_RESTARTS = 5;
+let shuttingDown = false;
+
+if (!process.env.JWT_SECRET) {
+    process.env.JWT_SECRET = 'vba-dev-secret';
+    console.warn('[STARTER] JWT_SECRET not set. Using local development fallback.');
+}
 
 async function seedDatabase() {
     try {
@@ -45,33 +52,55 @@ const servers = [
     { name: 'WS Server', path: './servers/ws-server.js' }
 ];
 
-// Seed first, then start servers
-await seedDatabase();
+function startServer(server, attempt = 0) {
+    console.log(`Starting ${server.name}${attempt > 0 ? ` (retry ${attempt})` : ''}...`);
 
-servers.forEach(server => {
-    console.log(`Starting ${server.name}...`);
     const child = spawn('node', [server.path], {
         stdio: 'inherit',
-        cwd: __dirname
+        cwd: __dirname,
+        env: { ...process.env }
     });
 
     child.on('error', (err) => {
         console.error(`Failed to start ${server.name}:`, err);
     });
 
-    child.on('exit', (code) => {
+    child.on('exit', (code, signal) => {
+        if (shuttingDown) return;
+
         if (code !== 0) {
-            console.log(`${server.name} exited with code ${code}`);
+            console.log(`${server.name} exited with code ${code}${signal ? `, signal ${signal}` : ''}`);
+        }
+
+        if ((code !== 0 || signal) && attempt < MAX_RESTARTS) {
+            setTimeout(() => startServer(server, attempt + 1), 1500);
         }
     });
 
-    // Cleanup on parent exit
-    const cleanup = () => {
-        console.log(`Killing ${server.name}...`);
-        child.kill();
-    };
-    process.on('SIGINT', cleanup);
-    process.on('SIGTERM', cleanup);
+    return child;
+}
+
+const children = [];
+
+function cleanup() {
+    shuttingDown = true;
+    children.forEach(({ name, child }) => {
+        if (!child.killed) {
+            console.log(`Killing ${name}...`);
+            child.kill();
+        }
+    });
+}
+
+// Seed first, then start servers
+await seedDatabase();
+
+servers.forEach(server => {
+    const child = startServer(server);
+    children.push({ name: server.name, child });
 });
+
+process.on('SIGINT', cleanup);
+process.on('SIGTERM', cleanup);
 
 console.log('API server initiated. You can now open login.html in your browser.');

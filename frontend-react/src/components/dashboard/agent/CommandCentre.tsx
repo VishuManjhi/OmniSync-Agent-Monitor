@@ -1,5 +1,5 @@
 import React from 'react';
-import { Play, Square, Coffee, Phone, Plus, Activity, CheckCircle } from 'lucide-react';
+import { Play, Square, Coffee, Phone, Plus, Activity, CheckCircle, X } from 'lucide-react';
 import { styles } from './agentDashboardStyles';
 import type { Ticket } from '../../../api/types';
 
@@ -132,6 +132,8 @@ const CommandCentre: React.FC<CommandCentreProps> = ({
                                 value={callDuration}
                                 onChange={(e) => setCallDuration(e.target.value)}
                                 placeholder="Enter minutes..."
+                                min={1}
+                                required
                             />
                         </div>
                         <div style={styles.fieldGroup}>
@@ -143,9 +145,19 @@ const CommandCentre: React.FC<CommandCentreProps> = ({
                                 onChange={(e) => handleAttachmentChange(e.target.files?.[0] || null)}
                             />
                             {attachment && (
-                                <span style={{ fontSize: '0.7rem', color: 'var(--accent-blue)' }}>
-                                    Selected: {attachment.name}
-                                </span>
+                                <div style={{ display: 'inline-flex', alignItems: 'center', gap: '8px', marginTop: '8px', padding: '6px 10px', borderRadius: '8px', background: 'var(--glass-highlight)', border: '1px solid var(--glass-border)' }}>
+                                    <span style={{ fontSize: '0.7rem', color: 'var(--accent-blue)', fontWeight: 700 }}>
+                                        {attachment.name}
+                                    </span>
+                                    <button
+                                        type="button"
+                                        aria-label="Remove selected file"
+                                        onClick={() => handleAttachmentChange(null)}
+                                        style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: '18px', height: '18px', borderRadius: '999px', border: '1px solid var(--glass-border)', background: 'transparent', color: 'var(--text-secondary)', cursor: 'pointer', padding: 0 }}
+                                    >
+                                        <X size={12} />
+                                    </button>
+                                </div>
                             )}
                         </div>
                         <button

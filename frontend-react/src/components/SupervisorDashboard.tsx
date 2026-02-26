@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { useWebSocket } from '../context/SocketContext';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient, keepPreviousData } from '@tanstack/react-query';
 import { fetchAgents, fetchSessions, fetchQueueStats, updateTicket, forceLogout, createTicket, fetchTickets, fetchAgentTickets } from '../api/agent';
 import type { Agent, AgentSession, Ticket } from '../api/types';
 import { Search, Plus, Phone, Activity, Clock, Users, Coffee, AlertTriangle, Eye } from 'lucide-react';
@@ -44,31 +44,52 @@ const SupervisorDashboard: React.FC = () => {
     const [activityFilter, setActivityFilter] = useState('ALL');
     const [page, setPage] = useState(1);
     const [confirmLogoutAgent, setConfirmLogoutAgent] = useState<string | null>(null);
+    const [nowTs, setNowTs] = useState(() => Date.now());
 
     // Queries
     const { data: agents = [], isLoading: isLoadingAgents } = useQuery({
         queryKey: ['agents'],
         queryFn: fetchAgents,
-        enabled: !!user?.id
+        enabled: !!user?.id,
+        refetchInterval: 15000,
+        refetchIntervalInBackground: true,
+        refetchOnReconnect: true,
+        refetchOnWindowFocus: true,
+        retry: 3
     });
 
     const { data: sessions = [], isLoading: isLoadingSessions } = useQuery({
         queryKey: ['sessions'],
         queryFn: fetchSessions,
-        enabled: !!user?.id
+        enabled: !!user?.id,
+        refetchInterval: 10000,
+        refetchIntervalInBackground: true,
+        refetchOnReconnect: true,
+        refetchOnWindowFocus: true,
+        retry: 3
     });
 
     const { data: stats, isLoading: isLoadingStats } = useQuery({
         queryKey: ['queue-stats'],
         queryFn: fetchQueueStats,
         enabled: !!user?.id,
-        refetchInterval: 10000 // Refresh every 10s
+        refetchInterval: 10000,
+        refetchIntervalInBackground: true,
+        refetchOnReconnect: true,
+        refetchOnWindowFocus: true,
+        retry: 3
     });
 
     const { data: activityData, isLoading: isLoadingActivity } = useQuery({
         queryKey: ['all-tickets', page, debouncedSearchTerm, activityFilter],
         queryFn: () => fetchTickets(page, 10, debouncedSearchTerm, activityFilter),
-        enabled: !!user?.id
+        enabled: !!user?.id,
+        placeholderData: keepPreviousData,
+        refetchInterval: 10000,
+        refetchIntervalInBackground: true,
+        refetchOnReconnect: true,
+        refetchOnWindowFocus: true,
+        retry: 3
     });
 
     const { data: agentTicketsData, isLoading: isLoadingAgentTickets } = useQuery({
@@ -96,8 +117,9 @@ const SupervisorDashboard: React.FC = () => {
             showNotification(`Ticket ${variables.ticketId} updated successfully`, 'success', 'TRANSMISSION UPDATED');
             setSelectedTicket(null);
         },
-        onError: (err: any) => {
-            showNotification(err.message || 'Failed to update ticket', 'error', 'SYSTEM ERROR');
+        onError: (err: unknown) => {
+            const message = err instanceof Error ? err.message : 'Failed to update ticket';
+            showNotification(message, 'error', 'SYSTEM ERROR');
         }
     });
 
@@ -107,8 +129,9 @@ const SupervisorDashboard: React.FC = () => {
             queryClient.invalidateQueries({ queryKey: ['sessions'] });
             showNotification(`Agent ${agentId} has been terminated from the session.`, 'success', 'ACCESS REVOKED');
         },
-        onError: (err: any) => {
-            showNotification(err.message || 'Failed to logout agent', 'error', 'SYSTEM ERROR');
+        onError: (err: unknown) => {
+            const message = err instanceof Error ? err.message : 'Failed to logout agent';
+            showNotification(message, 'error', 'SYSTEM ERROR');
         }
     });
 
@@ -120,8 +143,9 @@ const SupervisorDashboard: React.FC = () => {
             showNotification(`Ticket created and assigned to ${variables.agentId || 'Queue'}`, 'success', 'TRANSMISSION CREATED');
             setShowCreateTicket(false);
         },
-        onError: (err: any) => {
-            showNotification(err.message || 'Failed to create ticket', 'error', 'SYSTEM ERROR');
+        onError: (err: unknown) => {
+            const message = err instanceof Error ? err.message : 'Failed to create ticket';
+            showNotification(message, 'error', 'SYSTEM ERROR');
         }
     });
 
@@ -141,14 +165,25 @@ const SupervisorDashboard: React.FC = () => {
         }
     }, [lastMessage, queryClient]);
 
-    // Reset page to 1 when search term or filter changes
     useEffect(() => {
-        setPage(1);
-    }, [debouncedSearchTerm, activityFilter]);
+        const timer = window.setInterval(() => setNowTs(Date.now()), 60000);
+        return () => window.clearInterval(timer);
+    }, []);
 
-    useEffect(() => {
+    const handleSearchChange = (value: string) => {
+        setSearchTerm(value);
+        setPage(1);
+    };
+
+    const handleActivityFilterChange = (value: string) => {
+        setActivityFilter(value);
+        setPage(1);
+    };
+
+    const handleOpenAgentDrawer = (agent: Agent) => {
+        setSelectedAgentDrawer(agent);
         setAgentTicketsPage(1);
-    }, [selectedAgentDrawer?.agentId]);
+    };
 
     const handleForceLogout = (agentId: string) => {
         setConfirmLogoutAgent(agentId);
@@ -269,7 +304,7 @@ const SupervisorDashboard: React.FC = () => {
                             type="text"
                             placeholder="SEARCH AGENTS OR TICKETS..."
                             value={searchTerm}
-                            onChange={(e) => setSearchTerm(e.target.value)}
+                            onChange={(e) => handleSearchChange(e.target.value)}
                             style={styles.searchInput}
                         />
                     </div>
@@ -302,6 +337,7 @@ const SupervisorDashboard: React.FC = () => {
                                     <h2 style={styles.sectionTitle}>Agent Status Distribution</h2>
                                 </div>
                                 <SupervisorStatusPie
+                                    online={wsActiveCount}
                                     onCall={wsOnCallCount}
                                     onBreak={wsOnBreakCount}
                                     offline={wsOfflineCount}
@@ -322,8 +358,16 @@ const SupervisorDashboard: React.FC = () => {
 
                         <div className="glass-card" style={styles.recentTicketsSection}>
                             <div style={styles.sectionHeader}>
-                                <div style={styles.sectionIndicator} />
-                                <h2 style={styles.sectionTitle}>Recent Unresolved / Approval Tickets</h2>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                                    <div style={styles.sectionIndicator} />
+                                    <h2 style={styles.sectionTitle}>Recent Unresolved / Approval Tickets</h2>
+                                </div>
+                                <button
+                                    style={{ ...styles.createBtn, padding: '0.35rem 0.8rem', fontSize: '0.72rem' }}
+                                    onClick={() => setView('ACTIVITY')}
+                                >
+                                    View All
+                                </button>
                             </div>
 
                             <div style={styles.scrollContainer}>
@@ -333,11 +377,11 @@ const SupervisorDashboard: React.FC = () => {
                                             <span style={styles.ticketIdText}>{ticket.displayId || `#${ticket.ticketId.substring(0, 8).toUpperCase()}`}</span>
                                             <span style={{
                                                 ...styles.statusBadge,
-                                                background: 'rgba(168, 85, 247, 0.2)',
-                                                color: '#a855f7',
-                                                border: '1px solid rgba(168, 85, 247, 0.3)',
+                                                background: 'var(--glass-highlight)',
+                                                color: ticket.status === 'RESOLUTION_REQUESTED' ? 'var(--accent-blue)' : 'var(--accent-yellow)',
+                                                border: `1px solid ${ticket.status === 'RESOLUTION_REQUESTED' ? 'rgba(59,130,246,0.35)' : 'rgba(250,204,21,0.35)'}`,
                                                 padding: '4px 12px',
-                                                borderRadius: '8px',
+                                                borderRadius: '999px',
                                                 fontSize: '0.65rem',
                                                 fontWeight: '800'
                                             }}>
@@ -354,11 +398,14 @@ const SupervisorDashboard: React.FC = () => {
                                             <span style={styles.ticketRowValue}>{ticket.issueType}</span>
                                         </div>
 
-                                        <div style={styles.descriptionBox}>
+                                        <div style={{ ...styles.descriptionBox, background: 'var(--glass-highlight)', border: '1px solid var(--glass-border)' }}>
                                             {ticket.description}
                                         </div>
 
-                                        <div style={styles.ticketCardFooter}>
+                                        <div style={{ ...styles.ticketCardFooter, justifyContent: 'space-between' }}>
+                                            <span style={{ color: 'var(--text-secondary)', fontSize: '0.7rem', fontWeight: 700 }}>
+                                                {ticket.assignedBy === 'SUPERVISOR' ? 'Supervisor Assigned' : 'System Ticket'}
+                                            </span>
                                             <span style={styles.raisedAt}>
                                                 Raised at {new Date(ticket.issueDateTime).toLocaleString()}
                                             </span>
@@ -414,7 +461,7 @@ const SupervisorDashboard: React.FC = () => {
                                             cardIndex={idx}
                                             session={sessions.find(s => s.agentId === agent.agentId)}
                                             onForceLogout={handleForceLogout}
-                                            onClick={() => setSelectedAgentDrawer(agent)}
+                                            onClick={() => handleOpenAgentDrawer(agent)}
                                         />
                                     ))}
                             </div>
@@ -428,7 +475,7 @@ const SupervisorDashboard: React.FC = () => {
                             <h3 style={styles.sectionTitle}>Recent Activity</h3>
                             <select
                                 value={activityFilter}
-                                onChange={(e) => setActivityFilter(e.target.value)}
+                                onChange={(e) => handleActivityFilterChange(e.target.value)}
                                 style={styles.filterSelect}
                             >
                                 <option value="ALL">ALL TICKETS</option>
@@ -454,7 +501,7 @@ const SupervisorDashboard: React.FC = () => {
                                     {activity
                                         .map(ticket => {
                                             const agent = agents.find(a => a.agentId === ticket.agentId);
-                                            const isPriority = (Date.now() - ticket.issueDateTime) > 86400000 && ticket.status !== 'RESOLVED' && ticket.status !== 'REJECTED';
+                                            const isPriority = (nowTs - ticket.issueDateTime) > 86400000 && ticket.status !== 'RESOLVED' && ticket.status !== 'REJECTED';
 
                                             return (
                                                 <tr key={ticket.ticketId} style={styles.tr} onClick={() => setSelectedTicket(ticket)}>

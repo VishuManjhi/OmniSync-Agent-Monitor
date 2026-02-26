@@ -38,7 +38,8 @@ export const ticketSchema = z.object({
     description: z.string().min(5).max(1000),
     status: z.enum(['OPEN', 'IN_PROGRESS', 'ASSIGNED', 'RESOLUTION_REQUESTED', 'RESOLVED', 'REJECTED']).default('OPEN'),
     issueDateTime: z.number().default(() => Date.now()),
-    callDuration: z.number().nullable().optional(),
+    callDuration: z.number().int().positive().optional(),
+    createdBy: z.string().optional(),
     attachments: z.array(z.object({
         attachmentId: z.string().uuid(),
         fileName: z.string(),
@@ -47,6 +48,15 @@ export const ticketSchema = z.object({
         content: z.string().optional(), // Temporary until storage migration
         path: z.string().optional()
     })).optional()
+}).superRefine((data, ctx) => {
+    const isSupervisorCreated = !!data.createdBy;
+    if (!isSupervisorCreated && (typeof data.callDuration !== 'number' || data.callDuration <= 0)) {
+        ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: ['callDuration'],
+            message: 'Call duration is mandatory for agent-created tickets'
+        });
+    }
 });
 
 export const ticketUpdateSchema = z.object({

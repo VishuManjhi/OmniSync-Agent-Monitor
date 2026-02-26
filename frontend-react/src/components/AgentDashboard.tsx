@@ -27,7 +27,7 @@ import { useMessaging } from '../context/MessagingContext';
 
 // Modular Components & Hooks
 import { useAgentSession } from '../hooks/useAgentSession';
-import { styles } from './dashboard/agent/agentDashboardStyles';
+import { styles, getStatusColor } from './dashboard/agent/agentDashboardStyles';
 import AgentSideNav from './dashboard/agent/AgentSideNav';
 import DashboardOverview from './dashboard/agent/DashboardOverview';
 import TicketArchive from './dashboard/agent/TicketArchive';
@@ -58,11 +58,6 @@ const AgentDashboard: React.FC = () => {
     const [page, setPage] = useState(1);
     const limit = 5;
 
-    // Reset to page 1 when search changes
-    useEffect(() => {
-        setPage(1);
-    }, [debouncedSearchTerm]);
-
     // Queries
     const { data: agent, isLoading: isLoadingAgent } = useQuery({
         queryKey: ['agent', user?.id],
@@ -91,7 +86,6 @@ const AgentDashboard: React.FC = () => {
 
     // Custom Hook for Session Management
     const {
-        breakTime,
         shiftTime,
         deriveStatus,
         handleClockIn,
@@ -102,6 +96,11 @@ const AgentDashboard: React.FC = () => {
     } = useAgentSession(user?.id, session);
 
     const currentStatus = deriveStatus(session || null);
+    const todayLabel = new Intl.DateTimeFormat('en-US', {
+        weekday: 'long',
+        month: 'short',
+        day: 'numeric'
+    }).format(new Date());
 
     // Mutations
     const ticketMutation = useMutation({
@@ -136,8 +135,9 @@ const AgentDashboard: React.FC = () => {
                 console.warn('Failed to send ticket updated websocket message', err);
             }
         },
-        onError: (err: any) => {
-            showNotification(err.message || 'FAILED TO UPDATE TICKET', 'error', 'SYSTEM ERROR');
+        onError: (err: unknown) => {
+            const message = err instanceof Error ? err.message : 'FAILED TO UPDATE TICKET';
+            showNotification(message, 'error', 'SYSTEM ERROR');
         }
     });
 
@@ -151,7 +151,7 @@ const AgentDashboard: React.FC = () => {
         if ((lastMessage.type === 'TICKET_CREATED' || lastMessage.type === 'TICKET_UPDATED') && lastMessage.agentId === user?.id) {
             queryClient.invalidateQueries({ queryKey: ['tickets', user?.id] });
         }
-    }, [lastMessage, user, logout, queryClient]);
+    }, [lastMessage, user, logout, queryClient, showNotification]);
 
     // Force Logout check
     useEffect(() => {
@@ -159,7 +159,12 @@ const AgentDashboard: React.FC = () => {
             showNotification('You were force logged out by supervisor', 'warning', 'SESSION TERMINATED');
             logout();
         }
-    }, [agent, isLoadingAgent, logout]);
+    }, [agent, isLoadingAgent, logout, showNotification]);
+
+    const handleSearchTermChange = (value: string) => {
+        setSearchTerm(value);
+        setPage(1);
+    };
 
     // Helpers
     const formatTime = (seconds: number) => {
@@ -174,6 +179,12 @@ const AgentDashboard: React.FC = () => {
         if (!user || !issueType || !description) return;
         if (currentStatus === 'OFFLINE') return;
 
+        const parsedCallDuration = Number(callDuration);
+        if (!Number.isFinite(parsedCallDuration) || parsedCallDuration <= 0) {
+            showNotification('Call duration is mandatory and must be greater than 0', 'error', 'VALIDATION ERROR');
+            return;
+        }
+
         try {
             const ticket: Partial<Ticket> = {
                 ticketId: crypto.randomUUID(),
@@ -184,7 +195,7 @@ const AgentDashboard: React.FC = () => {
                 status: 'IN_PROGRESS',
                 issueDateTime: Date.now(),
                 startedAt: Date.now(),
-                callDuration: Number(callDuration) || null,
+                callDuration: parsedCallDuration,
                 attachments: []
             };
 
@@ -205,19 +216,25 @@ const AgentDashboard: React.FC = () => {
             }
 
             ticketMutation.mutate(ticket);
-        } catch (err) {
+        } catch {
             showNotification('Failed to process attachment', 'error', 'FILE ERROR');
         }
     };
 
     const handleTicketUpdate = (ticketId: string, newStatus: string) => {
-        updateTicketMutation.mutate({ ticketId, updates: { status: newStatus as any } });
+        const allowedStatuses: Ticket['status'][] = ['OPEN', 'IN_PROGRESS', 'ASSIGNED', 'RESOLUTION_REQUESTED', 'RESOLVED', 'REJECTED'];
+        if (!allowedStatuses.includes(newStatus as Ticket['status'])) {
+            showNotification('Invalid ticket status', 'error', 'SYSTEM ERROR');
+            return;
+        }
+
+        updateTicketMutation.mutate({ ticketId, updates: { status: newStatus as Ticket['status'] } });
     };
 
     const handleChatSubmit = (e: React.FormEvent) => {
         e.preventDefault();
         if (!chatContent.trim()) return;
-        sendChatMessage(chatContent);
+        sendChatMessage(chatContent, 'SUPERVISORS', 'HELP_REQUEST');
         setChatContent('');
     };
 
@@ -258,6 +275,13 @@ const AgentDashboard: React.FC = () => {
                         <h1 style={styles.viewTitle}>{activeView.replace('_', ' ')}</h1>
                         <span style={styles.breadcrumb}>OmniSync / Agent / Workspace</span>
                     </div>
+                    <div style={styles.headerActions}>
+                        <div style={styles.statusBadge}>
+                            <span style={{ ...styles.statusDot, background: getStatusColor(currentStatus) }} />
+                            {currentStatus}
+                        </div>
+                        <div style={styles.statBox}>{todayLabel}</div>
+                    </div>
                 </header>
 
                 <BroadcastBanner />
@@ -274,7 +298,7 @@ const AgentDashboard: React.FC = () => {
                     {activeView === 'TICKETS' && (
                         <TicketArchive
                             searchTerm={searchTerm}
-                            setSearchTerm={setSearchTerm}
+                            setSearchTerm={handleSearchTermChange}
                             filteredTickets={filteredTickets}
                             page={page}
                             setPage={setPage}

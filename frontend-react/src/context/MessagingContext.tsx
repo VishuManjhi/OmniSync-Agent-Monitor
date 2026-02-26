@@ -72,14 +72,6 @@ export const MessagingProvider: React.FC<{ children: React.ReactNode }> = ({ chi
                 return [newBroadcast, ...prev];
             });
 
-            // Notify ONLY if it's an incoming broadcast from someone else
-            if (!isFromMe) {
-                showNotification(
-                    lastMessage.content.length > 50 ? lastMessage.content.substring(0, 50) + '...' : lastMessage.content,
-                    'warning',
-                    'SYSTEM BROADCAST'
-                );
-            }
         } else if (lastMessage.type === 'HELP_REQUEST' || lastMessage.type === 'CHAT_MESSAGE') {
             // Notify supervisor or agent if it's an incoming message
             if (!isFromMe) {

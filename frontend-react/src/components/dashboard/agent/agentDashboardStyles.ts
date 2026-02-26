@@ -151,12 +151,12 @@ export const styles: Record<string, React.CSSProperties> = {
     viewTitle: {
         fontSize: '1.25rem',
         fontWeight: '800',
-        color: '#0f172a',
+        color: 'var(--text-primary)',
         textTransform: 'capitalize',
     },
     breadcrumb: {
         fontSize: '0.75rem',
-        color: '#94a3b8',
+        color: 'var(--text-muted)',
         fontWeight: '500',
     },
     headerActions: {
@@ -175,10 +175,11 @@ export const styles: Record<string, React.CSSProperties> = {
         gap: '8px',
         fontSize: '0.85rem',
         fontWeight: '700',
-        color: '#475569',
-        background: '#f8fafc',
+        color: 'var(--text-secondary)',
+        background: 'var(--glass-highlight)',
         padding: '6px 12px',
         borderRadius: '8px',
+        border: '1px solid var(--glass-border)',
     },
     statusBadge: {
         display: 'flex',
@@ -189,9 +190,10 @@ export const styles: Record<string, React.CSSProperties> = {
         textTransform: 'uppercase',
         letterSpacing: '0.05em',
         padding: '6px 12px',
-        background: '#f8fafc',
+        background: 'var(--glass-highlight)',
         borderRadius: '8px',
-        color: '#475569',
+        color: 'var(--text-secondary)',
+        border: '1px solid var(--glass-border)',
     },
     statusDot: {
         width: '8px',

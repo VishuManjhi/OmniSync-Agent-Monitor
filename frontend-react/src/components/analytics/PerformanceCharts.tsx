@@ -15,31 +15,33 @@ interface RatioData {
 export const BarChart: React.FC<{ data: MetricData[] }> = ({ data }) => {
     const hasData = data && data.length > 0 && data.some(d => (d.raised || 0) > 0);
     const maxVal = Math.max(...(data || []).map(d => d.raised || 0), 10);
-    const chartHeight = 120;
+    const barAreaHeight = 120;
     const gap = 15;
 
     if (!hasData) {
         return (
-            <div style={{ height: `${chartHeight}px`, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--glass-highlight)', borderRadius: '8px' }}>
+            <div style={{ height: `${barAreaHeight}px`, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--glass-highlight)', borderRadius: '8px' }}>
                 <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)', fontWeight: '600' }}>No activity recorded in the last 7 days</span>
             </div>
         );
     }
 
     return (
-        <div style={{ display: 'flex', alignItems: 'flex-end', gap: `${gap}px`, height: `${chartHeight}px`, padding: '10px' }}>
+        <div style={{ display: 'flex', alignItems: 'flex-end', gap: `${gap}px`, padding: '10px', minHeight: `${barAreaHeight + 28}px` }}>
             {data.map((d, i) => {
-                const height = ((d.raised || 0) / maxVal) * chartHeight;
+                const height = ((d.raised || 0) / maxVal) * (barAreaHeight - 10);
                 return (
-                    <div key={i} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '8px', flex: 1 }}>
-                        <div style={{
-                            width: '100%',
-                            height: `${Math.max(2, height)}px`,
-                            background: 'var(--accent-blue)',
-                            borderRadius: '4px 4px 0 0',
-                            transition: 'height 0.5s ease',
-                            opacity: 0.8
-                        }} />
+                    <div key={i} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '6px', flex: 1 }}>
+                        <div style={{ width: '100%', height: `${barAreaHeight}px`, display: 'flex', alignItems: 'flex-end' }}>
+                            <div style={{
+                                width: '100%',
+                                height: `${Math.max(4, height)}px`,
+                                background: 'var(--accent-blue)',
+                                borderRadius: '4px 4px 0 0',
+                                transition: 'height 0.5s ease',
+                                opacity: 0.85
+                            }} />
+                        </div>
                         <span style={{ fontSize: '0.65rem', color: 'var(--text-muted)', fontWeight: '700' }}>
                             {d.day.split('-').slice(1).join('/')}
                         </span>

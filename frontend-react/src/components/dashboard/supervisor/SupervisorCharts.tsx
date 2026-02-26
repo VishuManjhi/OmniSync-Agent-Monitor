@@ -1,6 +1,7 @@
 import React from 'react';
 
 interface StatusPieProps {
+    online: number;
     onCall: number;
     onBreak: number;
     offline: number;
@@ -11,15 +12,17 @@ interface TicketsBarProps {
     resolved: number;
 }
 
-export const SupervisorStatusPie: React.FC<StatusPieProps> = ({ onCall, onBreak, offline }) => {
-    const total = onCall + onBreak + offline;
+export const SupervisorStatusPie: React.FC<StatusPieProps> = ({ online, onCall, onBreak, offline }) => {
+    const total = online + onCall + onBreak + offline;
+    const onlinePct = total > 0 ? (online / total) * 100 : 0;
     const onCallPct = total > 0 ? (onCall / total) * 100 : 0;
     const onBreakPct = total > 0 ? (onBreak / total) * 100 : 0;
 
     const background = `conic-gradient(
-        #60a5fa 0% ${onCallPct}%,
-        #fb923c ${onCallPct}% ${onCallPct + onBreakPct}%,
-        #94a3b8 ${onCallPct + onBreakPct}% 100%
+        #34d399 0% ${onlinePct}%,
+        #60a5fa ${onlinePct}% ${onlinePct + onCallPct}%,
+        #fb923c ${onlinePct + onCallPct}% ${onlinePct + onCallPct + onBreakPct}%,
+        #94a3b8 ${onlinePct + onCallPct + onBreakPct}% 100%
     )`;
 
     return (
@@ -43,8 +46,9 @@ export const SupervisorStatusPie: React.FC<StatusPieProps> = ({ onCall, onBreak,
                 </div>
             </div>
 
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '10px' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '10px' }}>
                 {[
+                    { label: 'Online', value: online, color: '#34d399' },
                     { label: 'On Call', value: onCall, color: '#60a5fa' },
                     { label: 'On Break', value: onBreak, color: '#fb923c' },
                     { label: 'Offline', value: offline, color: '#94a3b8' }

@@ -4,8 +4,8 @@
   "type": "module",
   "scripts": {
     "start": "node backend/start-all.js",
-    "dev": "node backend/start-all.js",
-    "clear-ports": "powershell \"@(3003) | % { $conn = Get-NetTCPConnection -LocalPort $_ -ErrorAction SilentlyContinue; if ($conn) { Stop-Process -Id $conn.OwningProcess -Force } }\""
+    "dev": "npm run clear-ports && node backend/start-all.js",
+    "clear-ports": "powershell \"@(3003,8080) | % { $conn = Get-NetTCPConnection -LocalPort $_ -ErrorAction SilentlyContinue; if ($conn) { $pids = @($conn | Select-Object -ExpandProperty OwningProcess -Unique) | Where-Object { $_ -gt 4 }; foreach ($targetPid in $pids) { Stop-Process -Id $targetPid -Force -ErrorAction SilentlyContinue } } }\""
   },
   "dependencies": {
     "bcryptjs": "^3.0.3",
