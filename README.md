@@ -9,7 +9,7 @@
 
 
 **OmniSync Agent Monitor** (RestroBoard) is a production-grade, real-time dashboard designed for high-stakes call center environments. It bridges the gap between workforce monitoring and instant collaboration, providing supervisors with bird's-eye visibility and agents with immediate support channels.
->>>>>>> 96d6b75aad763178557c28b363e9710a2709f81a
+
 
 ---
 
