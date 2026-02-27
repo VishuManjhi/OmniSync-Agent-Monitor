@@ -5,11 +5,14 @@
   "scripts": {
     "start": "node backend/start-all.js",
     "dev": "npm run clear-ports && node backend/start-all.js",
+    "worker:sqs": "node backend/workers/sqsWorker.js",
     "clear-ports": "powershell \"@(3003,8080) | % { $conn = Get-NetTCPConnection -LocalPort $_ -ErrorAction SilentlyContinue; if ($conn) { $pids = @($conn | Select-Object -ExpandProperty OwningProcess -Unique) | Where-Object { $_ -gt 4 }; foreach ($targetPid in $pids) { Stop-Process -Id $targetPid -Force -ErrorAction SilentlyContinue } } }\""
   },
   "dependencies": {
+    "@aws-sdk/client-sqs": "^3.893.0",
     "bcryptjs": "^3.0.3",
     "cors": "^2.8.5",
+    "dotenv": "^16.6.1",
     "exceljs": "^4.4.0",
     "express": "^4.21.2",
     "express-rate-limit": "^8.2.1",

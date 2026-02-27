@@ -126,3 +126,30 @@ export interface AgentReport {
         slaPercent: number;
     };
 }
+
+export interface AsyncJobItem {
+    jobId: string;
+    type: 'EXCEL_EXPORT' | 'EMAIL_REPORT' | 'NOTIFICATION' | string;
+    status: 'QUEUED' | 'PROCESSING' | 'COMPLETED' | 'FAILED' | string;
+    result?: Record<string, unknown> | null;
+    error?: string | null;
+    attempts?: number;
+    createdAt?: string;
+    updatedAt?: string;
+}
+
+export interface AsyncJobsResponse {
+    total: number;
+    pages: number;
+    currentPage: number;
+    items: AsyncJobItem[];
+}
+
+export interface SlaBreachResponse {
+    hours: number;
+    threshold: number;
+    total: number;
+    pages: number;
+    currentPage: number;
+    breaches: Ticket[];
+}

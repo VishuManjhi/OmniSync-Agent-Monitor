@@ -9,8 +9,9 @@ export const AgentCard: React.FC<{
     session?: AgentSession,
     cardIndex: number,
     onForceLogout: (id: string) => void,
-    onClick: () => void
-}> = ({ agent, session, cardIndex: _cardIndex, onForceLogout, onClick }) => {
+    onClick: () => void,
+    onOpenReport: (agentId: string) => void
+}> = ({ agent, session, onForceLogout, onClick, onOpenReport }) => {
     const status = deriveAgentStatus(session);
     const statusColor = status === 'OFFLINE' ? 'var(--text-muted)' :
         status === 'ON_CALL' ? 'var(--accent-blue)' :
@@ -54,7 +55,7 @@ export const AgentCard: React.FC<{
                 </div>
             </div>
 
-            <div style={styles.cardContent}>
+            <div style={{ ...styles.cardContent, minHeight: '92px' }}>
                 <div style={{ ...styles.statusLabel, color: statusColor }}>
                     <Clock size={14} style={{ marginRight: '4px' }} />
                     {status}
@@ -64,6 +65,27 @@ export const AgentCard: React.FC<{
                         Out: {new Date(session.clockOutTime).toLocaleTimeString()}
                     </div>
                 )}
+
+                <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 'auto', paddingTop: '10px' }}>
+                    <button
+                        onClick={(e) => {
+                            e.stopPropagation();
+                            onOpenReport(agent.agentId);
+                        }}
+                        style={{
+                            border: '1px solid var(--glass-border)',
+                            borderRadius: '8px',
+                            background: 'var(--glass-highlight)',
+                            color: 'var(--text-primary)',
+                            padding: '6px 10px',
+                            fontSize: '0.72rem',
+                            fontWeight: 700,
+                            cursor: 'pointer'
+                        }}
+                    >
+                        Open Report
+                    </button>
+                </div>
             </div>
         </div>
     );

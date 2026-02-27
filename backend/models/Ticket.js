@@ -24,6 +24,7 @@ const ticketSchema = new mongoose.Schema({
     callDuration: { type: Number },
     priority: { type: String, enum: ['LOW', 'MEDIUM', 'HIGH', 'URGENT'], default: 'MEDIUM' },
     attachments: [attachmentSchema],
+    assignedBy: { type: String, enum: ['SUPERVISOR', 'SYSTEM'] },
     createdBy: { type: String },
     startedAt: { type: Number },
     resolvedAt: { type: Number },

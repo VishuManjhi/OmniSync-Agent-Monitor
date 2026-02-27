@@ -2,8 +2,8 @@ import React, { useEffect, useState } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { useWebSocket } from '../context/SocketContext';
 import { useQuery, useMutation, useQueryClient, keepPreviousData } from '@tanstack/react-query';
-import { fetchAgents, fetchSessions, fetchQueueStats, updateTicket, forceLogout, createTicket, fetchTickets, fetchAgentTickets } from '../api/agent';
-import type { Agent, AgentSession, Ticket } from '../api/types';
+import { fetchAgents, fetchSessions, fetchQueueStats, updateTicket, forceLogout, createTicket, fetchTickets, fetchAgentTickets, fetchAsyncJobs, fetchSlaBreaches, runSlaAutomation } from '../api/agent';
+import type { Agent, AgentSession, Ticket, AsyncJobItem } from '../api/types';
 import { Search, Plus, Phone, Activity, Clock, Users, Coffee, AlertTriangle, Eye } from 'lucide-react';
 import BroadcastBanner from './messaging/BroadcastBanner';
 
@@ -39,12 +39,15 @@ const SupervisorDashboard: React.FC = () => {
     const [searchTerm, setSearchTerm] = useState('');
     const debouncedSearchTerm = useDebounce(searchTerm, 300);
     const [statusFilter, setStatusFilter] = useState('ALL');
-    const [view, setView] = useState<'MONITOR' | 'AGENTS' | 'REPORTS' | 'ACTIVITY' | 'WORKSTATION' | 'MESSAGING'>('MONITOR');
+    const [view, setView] = useState<'MONITOR' | 'AGENTS' | 'REPORTS' | 'JOBS' | 'AUTOMATION' | 'ACTIVITY' | 'WORKSTATION' | 'MESSAGING'>('MONITOR');
 
     const [activityFilter, setActivityFilter] = useState('ALL');
     const [page, setPage] = useState(1);
     const [confirmLogoutAgent, setConfirmLogoutAgent] = useState<string | null>(null);
     const [nowTs, setNowTs] = useState(() => Date.now());
+    const [reportAgentId, setReportAgentId] = useState<string | null>(null);
+    const [jobsPage, setJobsPage] = useState(1);
+    const [slaPage, setSlaPage] = useState(1);
 
     // Queries
     const { data: agents = [], isLoading: isLoadingAgents } = useQuery({
@@ -98,8 +101,40 @@ const SupervisorDashboard: React.FC = () => {
         enabled: !!selectedAgentDrawer?.agentId
     });
 
+    const {
+        data: asyncJobsData,
+        isLoading: isLoadingJobs,
+        refetch: refetchJobs,
+        error: jobsError,
+        isError: isJobsError
+    } = useQuery({
+        queryKey: ['async-jobs', jobsPage],
+        queryFn: () => fetchAsyncJobs(jobsPage, 10),
+        enabled: !!user?.id && view === 'JOBS',
+        refetchInterval: view === 'JOBS' ? 5000 : false,
+        retry: 1
+    });
+
+    const {
+        data: slaBreaches,
+        isLoading: isLoadingSlaBreaches,
+        refetch: refetchSlaBreaches,
+        error: slaError,
+        isError: isSlaError
+    } = useQuery({
+        queryKey: ['sla-breaches', slaPage],
+        queryFn: () => fetchSlaBreaches(24, slaPage, 10),
+        enabled: !!user?.id && view === 'AUTOMATION',
+        retry: 1
+    });
+
     const activity = activityData?.tickets || [];
     const totalPages = activityData?.pages || 1;
+    const asyncJobs = asyncJobsData?.items || [];
+    const jobsTotalPages = asyncJobsData?.pages || 1;
+    const jobsCurrentPage = asyncJobsData?.currentPage || jobsPage;
+    const slaTotalPages = slaBreaches?.pages || 1;
+    const slaCurrentPage = slaBreaches?.currentPage || slaPage;
 
     const loading = isLoadingAgents || isLoadingSessions || isLoadingStats || isLoadingActivity;
 
@@ -149,6 +184,19 @@ const SupervisorDashboard: React.FC = () => {
         }
     });
 
+    const runSlaMutation = useMutation({
+        mutationFn: () => runSlaAutomation(24),
+        onSuccess: (res) => {
+            showNotification(`SLA automation escalated ${res.escalated} tickets`, 'success', 'AUTOMATION COMPLETE');
+            refetchSlaBreaches();
+            queryClient.invalidateQueries({ queryKey: ['all-tickets'] });
+        },
+        onError: (err: unknown) => {
+            const message = err instanceof Error ? err.message : 'Failed to run SLA automation';
+            showNotification(message, 'error', 'AUTOMATION ERROR');
+        }
+    });
+
     // WebSocket Handling
     useEffect(() => {
         if (lastMessage) {
@@ -170,6 +218,18 @@ const SupervisorDashboard: React.FC = () => {
         return () => window.clearInterval(timer);
     }, []);
 
+    useEffect(() => {
+        if (!isJobsError || view !== 'JOBS') return;
+        const message = jobsError instanceof Error ? jobsError.message : 'Failed to load Job Status';
+        showNotification(message, 'error', 'JOB STATUS ERROR');
+    }, [isJobsError, jobsError, view, showNotification]);
+
+    useEffect(() => {
+        if (!isSlaError || view !== 'AUTOMATION') return;
+        const message = slaError instanceof Error ? slaError.message : 'Failed to load SLA breaches';
+        showNotification(message, 'error', 'AUTOMATION ERROR');
+    }, [isSlaError, slaError, view, showNotification]);
+
     const handleSearchChange = (value: string) => {
         setSearchTerm(value);
         setPage(1);
@@ -183,6 +243,21 @@ const SupervisorDashboard: React.FC = () => {
     const handleOpenAgentDrawer = (agent: Agent) => {
         setSelectedAgentDrawer(agent);
         setAgentTicketsPage(1);
+    };
+
+    const handleOpenReportForAgent = (agentId: string) => {
+        setReportAgentId(agentId);
+        setView('REPORTS');
+    };
+
+    const handleOpenJobsView = () => {
+        setJobsPage(1);
+        setView('JOBS');
+    };
+
+    const handleOpenAutomationView = () => {
+        setSlaPage(1);
+        setView('AUTOMATION');
     };
 
     const handleForceLogout = (agentId: string) => {
@@ -244,10 +319,12 @@ const SupervisorDashboard: React.FC = () => {
         return <div style={{ color: 'white', padding: '2rem' }}>LOADING BOOT SEQUENCE...</div>;
     }
 
-    const viewTitleMap: Record<'MONITOR' | 'AGENTS' | 'REPORTS' | 'ACTIVITY' | 'WORKSTATION' | 'MESSAGING', string> = {
+    const viewTitleMap: Record<'MONITOR' | 'AGENTS' | 'REPORTS' | 'JOBS' | 'AUTOMATION' | 'ACTIVITY' | 'WORKSTATION' | 'MESSAGING', string> = {
         MONITOR: 'Dashboard',
         AGENTS: 'Agents',
         REPORTS: 'Report Centre',
+        JOBS: 'SQS Job Status',
+        AUTOMATION: 'SLA Automation',
         ACTIVITY: 'Activity Log',
         WORKSTATION: 'Workstation',
         MESSAGING: 'Messaging'
@@ -257,7 +334,17 @@ const SupervisorDashboard: React.FC = () => {
         <div style={agentStyles.appLayout}>
             <SupervisorSideNav
                 activeView={view}
-                setActiveView={setView}
+                setActiveView={(nextView) => {
+                    if (nextView === 'JOBS') {
+                        handleOpenJobsView();
+                        return;
+                    }
+                    if (nextView === 'AUTOMATION') {
+                        handleOpenAutomationView();
+                        return;
+                    }
+                    setView(nextView);
+                }}
                 supervisorId={user?.id}
                 logout={logout}
             />
@@ -462,13 +549,161 @@ const SupervisorDashboard: React.FC = () => {
                                             session={sessions.find(s => s.agentId === agent.agentId)}
                                             onForceLogout={handleForceLogout}
                                             onClick={() => handleOpenAgentDrawer(agent)}
+                                            onOpenReport={handleOpenReportForAgent}
                                         />
                                     ))}
                             </div>
                         </div>
                     </div>
                 ) : view === 'REPORTS' ? (
-                    <ReportCentre agents={agents} sessions={sessions} />
+                    <ReportCentre
+                        agents={agents}
+                        sessions={sessions}
+                        preselectedAgentId={reportAgentId}
+                            onJobTriggered={() => {
+                                queryClient.invalidateQueries({ queryKey: ['async-jobs'] });
+                            }}
+                    />
+                ) : view === 'JOBS' ? (
+                    <div className="glass-card" style={styles.activityLog}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
+                            <h3 style={styles.sectionTitle}>Recent SQS Jobs</h3>
+                            <button style={styles.createBtn} onClick={() => refetchJobs()}>
+                                Refresh
+                            </button>
+                        </div>
+                        <div style={{ overflowX: 'auto' }}>
+                            <table style={styles.table}>
+                                <thead>
+                                    <tr>
+                                        <th style={styles.th}>Job ID</th>
+                                        <th style={styles.th}>Type</th>
+                                        <th style={styles.th}>Status</th>
+                                        <th style={styles.th}>Attempts</th>
+                                        <th style={styles.th}>Updated</th>
+                                    </tr>
+                                </thead>
+                                <tbody style={{ opacity: isLoadingJobs ? 0.5 : 1 }}>
+                                    {asyncJobs.map((job: AsyncJobItem) => (
+                                        <tr key={job.jobId} style={styles.tr}>
+                                            <td style={styles.td}>{job.jobId.slice(0, 12)}...</td>
+                                            <td style={styles.td}>{job.type}</td>
+                                            <td style={styles.td}>{job.status}</td>
+                                            <td style={styles.td}>{job.attempts || 0}</td>
+                                            <td style={styles.td}>{job.updatedAt ? new Date(job.updatedAt).toLocaleString() : '-'}</td>
+                                        </tr>
+                                    ))}
+                                    {!isLoadingJobs && asyncJobs.length === 0 && (
+                                        <tr>
+                                            <td style={styles.td} colSpan={5}>No jobs found.</td>
+                                        </tr>
+                                    )}
+                                    {isJobsError && (
+                                        <tr>
+                                            <td style={styles.td} colSpan={5}>
+                                                {jobsError instanceof Error ? jobsError.message : 'Failed to load jobs'}
+                                            </td>
+                                        </tr>
+                                    )}
+                                </tbody>
+                            </table>
+                        </div>
+                        <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', marginTop: '1rem', gap: '1rem' }}>
+                            <button
+                                onClick={() => setJobsPage(p => Math.max(1, p - 1))}
+                                disabled={jobsCurrentPage === 1}
+                                style={{ ...styles.createBtn, opacity: jobsCurrentPage === 1 ? 0.5 : 1, padding: '0.5rem 1rem' }}
+                            >
+                                Previous
+                            </button>
+                            <span style={{ color: 'var(--text-light)', fontWeight: '600', fontSize: '0.9rem' }}>
+                                Page {jobsCurrentPage} of {jobsTotalPages}
+                            </span>
+                            <button
+                                onClick={() => setJobsPage(p => Math.min(jobsTotalPages, p + 1))}
+                                disabled={jobsCurrentPage === jobsTotalPages}
+                                style={{ ...styles.createBtn, opacity: jobsCurrentPage === jobsTotalPages ? 0.5 : 1, padding: '0.5rem 1rem' }}
+                            >
+                                Next
+                            </button>
+                        </div>
+                    </div>
+                ) : view === 'AUTOMATION' ? (
+                    <div className="glass-card" style={styles.activityLog}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
+                            <h3 style={styles.sectionTitle}>SLA Breach Automation (24h)</h3>
+                            <div style={{ display: 'flex', gap: '8px' }}>
+                                <button style={styles.filterSelect} onClick={() => refetchSlaBreaches()}>
+                                    Refresh
+                                </button>
+                                <button
+                                    style={{ ...styles.createBtn, opacity: runSlaMutation.isPending ? 0.7 : 1 }}
+                                    onClick={() => runSlaMutation.mutate()}
+                                    disabled={runSlaMutation.isPending}
+                                >
+                                    {runSlaMutation.isPending ? 'Running...' : 'Run Automation'}
+                                </button>
+                            </div>
+                        </div>
+                        <div style={{ marginBottom: '0.8rem', color: 'var(--text-muted)', fontWeight: 700 }}>
+                            Total breached unresolved tickets: {slaBreaches?.total || 0}
+                        </div>
+                        <div style={{ overflowX: 'auto' }}>
+                            <table style={styles.table}>
+                                <thead>
+                                    <tr>
+                                        <th style={styles.th}>Ticket</th>
+                                        <th style={styles.th}>Agent</th>
+                                        <th style={styles.th}>Issue</th>
+                                        <th style={styles.th}>Status</th>
+                                        <th style={styles.th}>Raised</th>
+                                    </tr>
+                                </thead>
+                                <tbody style={{ opacity: isLoadingSlaBreaches ? 0.5 : 1 }}>
+                                    {(slaBreaches?.breaches || []).map(ticket => (
+                                        <tr key={ticket.ticketId} style={styles.tr} onClick={() => setSelectedTicket(ticket)}>
+                                            <td style={styles.td}>{ticket.displayId || ticket.ticketId}</td>
+                                            <td style={styles.td}>{ticket.agentId}</td>
+                                            <td style={styles.td}>{ticket.issueType}</td>
+                                            <td style={styles.td}>{ticket.status}</td>
+                                            <td style={styles.td}>{new Date(ticket.issueDateTime).toLocaleString()}</td>
+                                        </tr>
+                                    ))}
+                                    {!isLoadingSlaBreaches && (slaBreaches?.breaches || []).length === 0 && (
+                                        <tr>
+                                            <td style={styles.td} colSpan={5}>No SLA breaches currently.</td>
+                                        </tr>
+                                    )}
+                                    {isSlaError && (
+                                        <tr>
+                                            <td style={styles.td} colSpan={5}>
+                                                {slaError instanceof Error ? slaError.message : 'Failed to load SLA breaches'}
+                                            </td>
+                                        </tr>
+                                    )}
+                                </tbody>
+                            </table>
+                        </div>
+                        <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', marginTop: '1rem', gap: '1rem' }}>
+                            <button
+                                onClick={() => setSlaPage(p => Math.max(1, p - 1))}
+                                disabled={slaCurrentPage === 1}
+                                style={{ ...styles.createBtn, opacity: slaCurrentPage === 1 ? 0.5 : 1, padding: '0.5rem 1rem' }}
+                            >
+                                Previous
+                            </button>
+                            <span style={{ color: 'var(--text-light)', fontWeight: '600', fontSize: '0.9rem' }}>
+                                Page {slaCurrentPage} of {slaTotalPages}
+                            </span>
+                            <button
+                                onClick={() => setSlaPage(p => Math.min(slaTotalPages, p + 1))}
+                                disabled={slaCurrentPage === slaTotalPages}
+                                style={{ ...styles.createBtn, opacity: slaCurrentPage === slaTotalPages ? 0.5 : 1, padding: '0.5rem 1rem' }}
+                            >
+                                Next
+                            </button>
+                        </div>
+                    </div>
                 ) : view === 'ACTIVITY' ? (
                     <div className="glass-card" style={styles.activityLog}>
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>

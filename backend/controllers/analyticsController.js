@@ -1,139 +1,19 @@
 import Ticket from '../models/Ticket.js';
 import Session from '../models/Session.js';
 import Message from '../models/Message.js';
+import AsyncJob from '../models/AsyncJob.js';
 import Agent from '../models/Agent.js';
-import ExcelJS from 'exceljs';
-import nodemailer from 'nodemailer';
+import mongoose from 'mongoose';
+import { enqueueAsyncJob } from '../services/queueService.js';
+import { buildAgentReportMetrics, buildWorkbookBuffer } from '../services/reportService.js';
 
-const getRangeStart = (period) => {
-    const now = Date.now();
-    if (period === 'monthly') return now - (30 * 24 * 60 * 60 * 1000);
-    return now - (7 * 24 * 60 * 60 * 1000);
-};
+const resolveAgent = async (agentKey) => {
+    if (mongoose.Types.ObjectId.isValid(agentKey)) {
+        const byId = await Agent.findById(agentKey).lean();
+        if (byId) return byId;
+    }
 
-const buildAgentReportMetrics = async (agentId, period = 'weekly') => {
-    const since = getRangeStart(period);
-
-    const [agent, ticketAgg, attendanceAgg, liveSession] = await Promise.all([
-        Agent.findOne({ agentId: { $regex: new RegExp(`^${agentId}$`, 'i') } }).lean(),
-        Ticket.aggregate([
-            {
-                $match: {
-                    agentId: { $regex: new RegExp(`^${agentId}$`, 'i') },
-                    issueDateTime: { $gte: since }
-                }
-            },
-            {
-                $group: {
-                    _id: null,
-                    totalRaised: { $sum: 1 },
-                    totalResolved: { $sum: { $cond: [{ $eq: ['$status', 'RESOLVED'] }, 1, 0] } },
-                    totalRejected: { $sum: { $cond: [{ $eq: ['$status', 'REJECTED'] }, 1, 0] } }
-                }
-            }
-        ]),
-        Session.aggregate([
-            {
-                $match: {
-                    agentId: { $regex: new RegExp(`^${agentId}$`, 'i') },
-                    clockInTime: { $gte: since }
-                }
-            },
-            {
-                $project: {
-                    duration: {
-                        $subtract: [
-                            { $ifNull: ['$clockOutTime', Date.now()] },
-                            '$clockInTime'
-                        ]
-                    }
-                }
-            },
-            {
-                $group: {
-                    _id: null,
-                    totalDurationMs: { $sum: '$duration' }
-                }
-            }
-        ]),
-        Session.findOne({ agentId, clockOutTime: null }).sort({ clockInTime: -1 }).lean()
-    ]);
-
-    const ahtAgg = await Ticket.aggregate([
-        {
-            $match: {
-                agentId: { $regex: new RegExp(`^${agentId}$`, 'i') },
-                status: 'RESOLVED',
-                startedAt: { $gt: 0 },
-                resolvedAt: { $gte: since }
-            }
-        },
-        {
-            $group: {
-                _id: null,
-                totalTime: { $sum: { $subtract: ['$resolvedAt', '$startedAt'] } },
-                count: { $sum: 1 }
-            }
-        }
-    ]);
-
-    const totals = ticketAgg[0] || { totalRaised: 0, totalResolved: 0, totalRejected: 0 };
-    const totalAttendanceHours = Number((((attendanceAgg[0]?.totalDurationMs || 0) / (1000 * 60 * 60)).toFixed(2)));
-    const avgHandleTimeSeconds = ahtAgg[0] ? Math.floor(ahtAgg[0].totalTime / ahtAgg[0].count / 1000) : 0;
-    const slaPercent = totals.totalRaised ? Number(((totals.totalResolved / totals.totalRaised) * 100).toFixed(2)) : 0;
-
-    const status = !liveSession || liveSession.clockOutTime
-        ? 'OFFLINE'
-        : (liveSession.breaks?.some?.(b => !b.breakOut)
-            ? 'ON_BREAK'
-            : (liveSession.onCall ? 'ON_CALL' : 'ACTIVE'));
-
-    return {
-        period,
-        from: since,
-        to: Date.now(),
-        agent: {
-            agentId,
-            name: agent?.name || agentId,
-            email: agent?.email || null,
-            status
-        },
-        metrics: {
-            totalRaised: totals.totalRaised,
-            totalResolved: totals.totalResolved,
-            totalRejected: totals.totalRejected,
-            attendanceHours: totalAttendanceHours,
-            avgHandleTimeSeconds,
-            slaPercent
-        }
-    };
-};
-
-const buildWorkbookBuffer = async (report) => {
-    const workbook = new ExcelJS.Workbook();
-    const sheet = workbook.addWorksheet('Agent Report');
-
-    sheet.columns = [
-        { header: 'Metric', key: 'metric', width: 28 },
-        { header: 'Value', key: 'value', width: 24 }
-    ];
-
-    sheet.addRow({ metric: 'Agent ID', value: report.agent.agentId });
-    sheet.addRow({ metric: 'Agent Name', value: report.agent.name });
-    sheet.addRow({ metric: 'Period', value: report.period.toUpperCase() });
-    sheet.addRow({ metric: 'Live Status', value: report.agent.status });
-    sheet.addRow({ metric: 'Total Tickets Raised', value: report.metrics.totalRaised });
-    sheet.addRow({ metric: 'Total Tickets Resolved', value: report.metrics.totalResolved });
-    sheet.addRow({ metric: 'Total Tickets Rejected', value: report.metrics.totalRejected });
-    sheet.addRow({ metric: 'Attendance (Hours)', value: report.metrics.attendanceHours });
-    sheet.addRow({ metric: 'AHT (Seconds)', value: report.metrics.avgHandleTimeSeconds });
-    sheet.addRow({ metric: 'SLA %', value: report.metrics.slaPercent });
-    sheet.addRow({ metric: 'Generated At', value: new Date().toISOString() });
-
-    const headerRow = sheet.getRow(1);
-    headerRow.font = { bold: true };
-
-    return workbook.xlsx.writeBuffer();
+    return Agent.findOne({ agentId: { $regex: new RegExp(`^${agentKey}$`, 'i') } }).lean();
 };
 
 /**
@@ -241,14 +121,21 @@ export const getBroadcasts = async (req, res, next) => {
  */
 export const getAgentAnalytics = async (req, res, next) => {
     try {
-        const { agentId } = req.params;
+        const { agentId: agentKey } = req.params;
         const sevenDaysAgo = Date.now() - (7 * 24 * 60 * 60 * 1000);
+        const agent = await resolveAgent(agentKey);
+
+        if (!agent) {
+            return res.status(404).json({ error: 'AGENT_NOT_FOUND' });
+        }
+
+        const canonicalAgentId = agent.agentId;
 
         // 1. Ticket Analytics (Raised vs Resolved over last 7 days)
         const ticketStats = await Ticket.aggregate([
             {
                 $match: {
-                    agentId: { $regex: new RegExp(`^${agentId}$`, 'i') },
+                    agentId: canonicalAgentId,
                     issueDateTime: { $gte: sevenDaysAgo }
                 }
             },
@@ -270,7 +157,7 @@ export const getAgentAnalytics = async (req, res, next) => {
         const sessionStats = await Session.aggregate([
             {
                 $match: {
-                    agentId: { $regex: new RegExp(`^${agentId}$`, 'i') },
+                    agentId: canonicalAgentId,
                     clockInTime: { $gte: sevenDaysAgo }
                 }
             },
@@ -295,14 +182,14 @@ export const getAgentAnalytics = async (req, res, next) => {
         ]);
 
         // 3. Current Session Break History
-        const currentSession = await Session.findOne({ agentId, clockOutTime: null })
+        const currentSession = await Session.findOne({ agentId: canonicalAgentId, clockOutTime: null })
             .sort({ clockInTime: -1 });
 
         const breakHistory = currentSession ? currentSession.breaks || [] : [];
 
         // 4. Overall Resolution Ratio (for Pie Chart)
         const overallStats = await Ticket.aggregate([
-            { $match: { agentId: { $regex: new RegExp(`^${agentId}$`, 'i') } } },
+            { $match: { agentId: canonicalAgentId } },
             {
                 $facet: {
                     ratios: [
@@ -393,44 +280,188 @@ export const emailAgentReport = async (req, res, next) => {
         const { agentId } = req.params;
         const period = req.body?.period === 'monthly' ? 'monthly' : 'weekly';
 
-        const report = await buildAgentReportMetrics(agentId, period);
-        if (!report.agent.email) {
-            return res.status(400).json({ error: 'AGENT_EMAIL_NOT_CONFIGURED' });
-        }
-
-        const host = process.env.SMTP_HOST;
-        const port = Number(process.env.SMTP_PORT || 587);
-        const user = process.env.SMTP_USER;
-        const pass = process.env.SMTP_PASS;
-        const from = process.env.SMTP_FROM || user;
-
-        if (!host || !port || !user || !pass || !from) {
-            return res.status(500).json({ error: 'EMAIL_NOT_CONFIGURED' });
-        }
-
-        const transporter = nodemailer.createTransport({
-            host,
-            port,
-            secure: port === 465,
-            auth: { user, pass }
+        const job = await enqueueAsyncJob('EMAIL_REPORT', {
+            agentId,
+            period,
+            requestedBy: req.user?.agentId || req.user?.id || 'system'
         });
 
-        const buffer = await buildWorkbookBuffer(report);
+        res.status(202).json({ ok: true, ...job });
+    } catch (err) {
+        next(err);
+    }
+};
 
-        await transporter.sendMail({
-            from,
-            to: report.agent.email,
-            subject: `Performance Report (${period}) - ${report.agent.name}`,
-            text: `Hi ${report.agent.name}, please find your ${period} performance report attached.`,
-            attachments: [
-                {
-                    filename: `${report.agent.agentId}-${period}-report.xlsx`,
-                    content: Buffer.from(buffer)
-                }
-            ]
+export const enqueueAgentReportExport = async (req, res, next) => {
+    try {
+        const { agentId } = req.params;
+        const period = req.body?.period === 'monthly' ? 'monthly' : 'weekly';
+
+        const job = await enqueueAsyncJob('EXCEL_EXPORT', {
+            agentId,
+            period,
+            requestedBy: req.user?.agentId || req.user?.id || 'system'
         });
 
-        res.json({ ok: true, sentTo: report.agent.email });
+        res.status(202).json({ ok: true, ...job });
+    } catch (err) {
+        next(err);
+    }
+};
+
+export const enqueueNotification = async (req, res, next) => {
+    try {
+        const content = String(req.body?.content || '').trim();
+        const receiverId = req.body?.receiverId ? String(req.body.receiverId) : null;
+
+        if (!content) {
+            return res.status(400).json({ error: 'CONTENT_REQUIRED' });
+        }
+
+        const job = await enqueueAsyncJob('NOTIFICATION', {
+            senderId: req.user?.agentId || req.user?.id || 'system',
+            receiverId,
+            content
+        });
+
+        res.status(202).json({ ok: true, ...job });
+    } catch (err) {
+        next(err);
+    }
+};
+
+export const getAsyncJobStatus = async (req, res, next) => {
+    try {
+        const { jobId } = req.params;
+        const job = await AsyncJob.findOne({ jobId }).lean();
+
+        if (!job) {
+            return res.status(404).json({ error: 'JOB_NOT_FOUND' });
+        }
+
+        res.json({
+            jobId: job.jobId,
+            type: job.type,
+            status: job.status,
+            result: job.result,
+            error: job.error,
+            attempts: job.attempts,
+            updatedAt: job.updatedAt
+        });
+    } catch (err) {
+        next(err);
+    }
+};
+
+export const listAsyncJobs = async (req, res, next) => {
+    try {
+        const page = Math.max(parseInt(req.query.page, 10) || 1, 1);
+        const limit = Math.min(parseInt(req.query.limit, 10) || 25, 100);
+        const skip = (page - 1) * limit;
+        const status = req.query.status ? String(req.query.status) : null;
+        const type = req.query.type ? String(req.query.type) : null;
+
+        const query = {};
+        if (status) query.status = status;
+        if (type) query.type = type;
+
+        const [total, jobs] = await Promise.all([
+            AsyncJob.countDocuments(query),
+            AsyncJob.find(query)
+                .sort({ createdAt: -1 })
+                .skip(skip)
+                .limit(limit)
+                .lean()
+        ]);
+
+        res.json({
+            total,
+            pages: Math.max(Math.ceil(total / limit), 1),
+            currentPage: page,
+            items: jobs.map(job => ({
+                jobId: job.jobId,
+                type: job.type,
+                status: job.status,
+                result: job.result,
+                error: job.error,
+                attempts: job.attempts,
+                createdAt: job.createdAt,
+                updatedAt: job.updatedAt
+            }))
+        });
+    } catch (err) {
+        next(err);
+    }
+};
+
+export const getSlaBreaches = async (req, res, next) => {
+    try {
+        const hours = Math.max(parseInt(req.query.hours, 10) || 24, 1);
+        const page = Math.max(parseInt(req.query.page, 10) || 1, 1);
+        const limit = Math.min(parseInt(req.query.limit, 10) || 10, 100);
+        const skip = (page - 1) * limit;
+        const breachThreshold = Date.now() - (hours * 60 * 60 * 1000);
+        const query = {
+            issueDateTime: { $lt: breachThreshold },
+            status: { $nin: ['RESOLVED', 'REJECTED'] }
+        };
+
+        const [total, breaches] = await Promise.all([
+            Ticket.countDocuments(query),
+            Ticket.find(query)
+                .sort({ issueDateTime: 1 })
+                .skip(skip)
+                .limit(limit)
+                .lean()
+        ]);
+
+        res.json({
+            hours,
+            threshold: breachThreshold,
+            total,
+            pages: Math.max(Math.ceil(total / limit), 1),
+            currentPage: page,
+            breaches
+        });
+    } catch (err) {
+        next(err);
+    }
+};
+
+export const runSlaAutomation = async (req, res, next) => {
+    try {
+        const hours = Math.max(parseInt(req.body?.hours, 10) || 24, 1);
+        const breachThreshold = Date.now() - (hours * 60 * 60 * 1000);
+
+        const breachedTickets = await Ticket.find({
+            issueDateTime: { $lt: breachThreshold },
+            status: { $nin: ['RESOLVED', 'REJECTED'] }
+        }).lean();
+
+        if (!breachedTickets.length) {
+            return res.json({ ok: true, escalated: 0, notified: false });
+        }
+
+        const ticketIds = breachedTickets.map(t => t.ticketId);
+
+        await Ticket.updateMany(
+            { ticketId: { $in: ticketIds } },
+            { $set: { priority: 'URGENT' } }
+        );
+
+        const notificationMessage = `SLA automation escalated ${ticketIds.length} breached ticket(s) older than ${hours}h.`;
+        await enqueueAsyncJob('NOTIFICATION', {
+            senderId: req.user?.agentId || req.user?.id || 'system',
+            receiverId: null,
+            content: notificationMessage
+        });
+
+        res.json({
+            ok: true,
+            escalated: ticketIds.length,
+            notified: true,
+            ticketIds
+        });
     } catch (err) {
         next(err);
     }

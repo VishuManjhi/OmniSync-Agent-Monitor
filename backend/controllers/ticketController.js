@@ -167,6 +167,37 @@ export const updateTicket = async (req, res, next) => {
             ? { $or: [{ _id: ticketId }, { ticketId: ticketId }] }
             : { ticketId };
 
+        const existingTicket = await Ticket.findOne(query).lean();
+        if (!existingTicket) {
+            return res.status(404).json({ error: 'NOT_FOUND' });
+        }
+
+        const nextStatus = updates.status;
+        const currentStatus = existingTicket.status;
+        const isSupervisorAssigned = existingTicket.assignedBy === 'SUPERVISOR' || (!!existingTicket.createdBy && existingTicket.status !== 'OPEN');
+
+        if (nextStatus && isSupervisorAssigned) {
+            if (currentStatus === 'ASSIGNED' && nextStatus !== 'IN_PROGRESS') {
+                return res.status(400).json({ error: 'INVALID_STATUS_TRANSITION', message: 'Assigned supervisor ticket must be accepted first' });
+            }
+
+            if (currentStatus === 'IN_PROGRESS' && nextStatus !== 'RESOLUTION_REQUESTED') {
+                return res.status(400).json({ error: 'INVALID_STATUS_TRANSITION', message: 'Supervisor ticket in progress must request resolution first' });
+            }
+
+            if (currentStatus === 'RESOLUTION_REQUESTED' && !['RESOLVED', 'IN_PROGRESS'].includes(nextStatus)) {
+                return res.status(400).json({ error: 'INVALID_STATUS_TRANSITION', message: 'Awaiting-resolution ticket can only be approved or sent back to in-progress' });
+            }
+
+            if (['RESOLVED', 'REJECTED'].includes(currentStatus)) {
+                return res.status(400).json({ error: 'INVALID_STATUS_TRANSITION', message: 'Finalized ticket cannot transition' });
+            }
+        }
+
+        if (nextStatus === 'RESOLUTION_REQUESTED' && !updates.resolutionRequestedAt) {
+            updates.resolutionRequestedAt = Date.now();
+        }
+
         // Automatically append resolvedAt timestamp if status is being updated directly to RESOLVED
         if (updates.status === 'RESOLVED' && !updates.resolvedAt) {
             updates.resolvedAt = Date.now();

@@ -39,6 +39,7 @@ export const ticketSchema = z.object({
     status: z.enum(['OPEN', 'IN_PROGRESS', 'ASSIGNED', 'RESOLUTION_REQUESTED', 'RESOLVED', 'REJECTED']).default('OPEN'),
     issueDateTime: z.number().default(() => Date.now()),
     callDuration: z.number().int().positive().optional(),
+    assignedBy: z.enum(['SUPERVISOR', 'SYSTEM']).optional(),
     createdBy: z.string().optional(),
     attachments: z.array(z.object({
         attachmentId: z.string().uuid(),

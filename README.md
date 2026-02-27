@@ -1,139 +1,116 @@
-# 🟢 OmniSync Agent Monitor
+# OmniSync (VBA)
 
-[![React](https://img.shields.io/badge/React-19-61DAFB?style=for-the-badge&logo=react)](https://react.dev/)
-[![TypeScript](https://img.shields.io/badge/TypeScript-5.9-3178C6?style=for-the-badge&logo=typescript)](https://www.typescriptlang.org/)
-[![Node.js](https://img.shields.io/badge/Node.js-Express-339933?style=for-the-badge&logo=nodedotjs)](https://nodejs.org/)
-[![MongoDB](https://img.shields.io/badge/MongoDB-Mongoose-47A248?style=for-the-badge&logo=mongodb)](https://www.mongodb.com/)
-[![Socket.IO](https://img.shields.io/badge/Socket.IO-Real--Time-white?style=for-the-badge&logo=socketdotio)](https://socket.io/)
+Real-time Agent/Supervisor operations platform with ticket lifecycle management, live messaging, analytics, and report export.
 
+## Features
+- Role-based login (`agent`, `supervisor`) with JWT auth.
+- Agent workspace: session control, ticket raise/update flow, support messaging.
+- Supervisor dashboard: live monitoring, agent controls, ticket approvals/rejections, report centre.
+- Real-time events over Socket.IO (status, ticket updates, messaging, force logout).
+- Analytics APIs for queue stats, agent trends, and report metrics.
+- Excel report export and optional email delivery via SMTP.
 
-**OmniSync Agent Monitor** is a production-grade, real-time dashboard designed for high-stakes call center environments. It bridges the gap between workforce monitoring and instant collaboration, providing supervisors with bird's-eye visibility and agents with immediate support channels.
-=======
-**OmniSync Agent Monitor** (RestroBoard) is a production-grade, real-time dashboard designed for high-stakes call center environments. It bridges the gap between workforce monitoring and instant collaboration, providing supervisors with bird's-eye visibility and agents with immediate support channels.
->>>>>>> 96d6b75aad763178557c28b363e9710a2709f81a
+## Tech Stack
+- Frontend: React 19, TypeScript, Vite, TanStack Query.
+- Backend: Node.js, Express, Passport JWT, Zod validation.
+- Database: MongoDB + Mongoose.
+- Realtime: Socket.IO.
+- Reporting: ExcelJS + Nodemailer.
 
----
+## Repository Layout
+- `backend/` API server, WS server, controllers, routes, models, middleware.
+- `frontend-react/` modern React UI.
+- `frontend/` legacy static frontend.
+- `uploads/` runtime file storage (ignored from git).
 
-## � Table of Contents
-- [✨ Key Features](#-key-features)
-- [🏗 Architecture & Real-Time Flow](#-architecture--real-time-flow)
-- [🛠 Tech Stack](#-tech-stack)
-- [🚀 Getting Started](#-getting-started)
-- [📂 Project Structure](#-project-structure)
-- [🔒 Security & Authentication](#-security--authentication)
-- [👤 Author](#-author)
+## Prerequisites
+- Node.js 18+
+- MongoDB (local or Atlas)
 
----
+## Environment Variables (Backend)
+Create a `.env` (or set shell vars):
+- `PORT` (default `3003`)
+- `MONGODB_URI` (Mongo connection string)
+- `JWT_SECRET` (required in production)
+- `ALLOWED_ORIGINS` (comma-separated origins; optional)
+- `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, `SMTP_FROM` (optional, for email reports)
+- `AWS_REGION`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `SQS_QUEUE_URL` (required for async report/email/notification queue)
 
-## ✨ Key Features
-
-### 🖥️ Supervisor Command Center
-- **Live Agent Monitor**: A dynamic grid tracking statuses (Active, On Call, On Break, Offline) in real-time.
-- **Transmission Center**: Specialized broadcast tool allowing **Global Alerts** to all agents or **Targeted Private Messages** to specific individuals via a searchable directory.
-- **SOS Help Desk**: Integrated supervisor chat to respond to real-time support requests from agents.
-- **Advanced WorkStation**: Visual KPI strip, status breakdown charts, and a detailed 6-column ticket metrics grid.
-- **Ticket Lifecycle**: Full control over ticket status (Approve/Reject) with image attachments and zoom-in previews.
-
-### 👤 Agent Workspace
-- **Real-Time SOS Widget**: One-click "Help Request" button that opens a direct line to all active supervisors.
-- **Broadcast Heads-up Display (HUD)**: Persistent alert banner for system-wide announcements.
-- **Session Tracking**: Precise clock-in/out logic with automatic break duration monitoring and live activity syncing.
-- **Smart Notifications**: Premium toast alerts for incoming messages and system broadcasts.
-
----
-
-## 🏗 Architecture & Real-Time Flow
-
-Our platform uses a **Dual-Channel** communication strategy:
-
-1.  **REST Channel**: Handled by Express & Passport.js for high-security operations (Auth, Ticket Creation, File Uploads).
-2.  **Socket Channel**: Handled by Socket.IO for event-driven updates (Status changes, Instant messaging, Force Logout commands).
-
-### Message Persistence Logic
-- Every message is assigned a **Client-Side UUID** immediately upon sending (Optimistic Update).
-- Messages are persisted in **MongoDB** via the `Message` model.
-- The server routes packets based on `receiverId` (Targeted) or `room:agents` (Broadcast).
-
----
-
-## 🛠 Tech Stack
-
-| Layer | Technologies |
-| :--- | :--- |
-| **Frontend** | React 19, TypeScript, Vite, TanStack Query, Lucide Icons |
-| **Backend** | Node.js, Express, Multer (File Handling) |
-| **Database** | MongoDB + Mongoose ODM |
-| **Real-Time** | Socket.IO (WebSockets) |
-| **Auth** | JWT (JSON Web Tokens) & Passport.js |
-| **Offline** | IndexedDB Action Queueing |
-
----
-
-## 🚀 Getting Started
-
-### Prerequisites
-- Node.js (v18+)
-- MongoDB (Local or Atlas)
-- NPM (v9+)
-
-### 1. Installation
+## Install
 ```bash
-git clone https://github.com/VishuManjhi/OmniSync-Agent-Monitor.git
-cd OmniSync-Agent-Monitor
+npm install
+cd frontend-react
 npm install
 ```
 
-### 2. Configure Environment
-Create a `.env` in the `backend` folder:
-```env
-PORT=3003
-MONGODB_URI=your_mongodb_connection_string
-JWT_SECRET=your_secret_key
-```
-
-### 3. Seed Database & Run
+## Run (Local)
+From repo root:
 ```bash
-# Register default agents and supervisors
-node backend/seed.js
-
-# Start backend & websocket servers
+npm run clear-ports
 npm run dev
+```
+This starts API (`3003`) + WS (`8080`).
 
-# Start frontend (in separate terminal)
-cd frontend-react && npm run dev
+If `SQS_QUEUE_URL` is configured, SQS worker starts automatically with the stack.
+
+Or run worker separately:
+```bash
+npm run worker:sqs
 ```
 
----
-
-## � Project Structure
-
-```text
-OmniSync/
-├── backend/
-│   ├── models/            # Persistence Layer (Mongoose)
-│   ├── servers/           # Logic Layer (API & WebSocket Hub)
-│   ├── uploads/           # Physical Storage (Ticket Attachments)
-│   └── seed.js            # Initialization Script
-└── frontend-react/
-    ├── src/
-    │   ├── api/           # Data Fetching & IndexedDB Sync
-    │   ├── context/       # State Engines (Auth, Socket, Messaging)
-    │   └── components/    # UI Layer (Supervisor, Agent, Messaging)
+In another terminal:
+```bash
+cd frontend-react
+npm run dev
 ```
 
----
+## Key API Areas
+- Auth: `/api/auth/*`
+- Agent sessions: `/api/agent-sessions`
+- Tickets: `/api/tickets`
+- Queue/analytics: `/api/queue-stats`
+- Reports:
+  - `GET /api/queue-stats/agent/:agentId/report?period=weekly|monthly`
+  - `GET /api/queue-stats/agent/:agentId/report/export?period=...` (sync fallback)
+  - `POST /api/queue-stats/agent/:agentId/report/export` (async queued)
+  - `POST /api/queue-stats/agent/:agentId/report/email` (async queued)
+  - `POST /api/queue-stats/notifications` (async queued)
+  - `GET /api/queue-stats/jobs/:jobId` (job status)
 
-## 🔒 Security & Authentication
-- **Role-Based Access Control (RBAC)**: Distinct routes and capabilities for Supervisors vs. Agents.
-- **Bcrypt Hashing**: Secure password storage with auto-migration to hashed passwords on successful login.
-- **Force Logout**: Supervisor commands trigger a hard redirection on the agent's side, effectively terminating the session immediately.
+## Ticket Workflow (Supervisor-assigned)
+Enforced server-side:
+1. `ASSIGNED` → `IN_PROGRESS` (Accept Task)
+2. `IN_PROGRESS` → `RESOLUTION_REQUESTED` (Request Resolution)
+3. `RESOLUTION_REQUESTED` → `RESOLVED` (Approve) or `IN_PROGRESS` (Reject/Send back)
 
----
+Direct resolution from `IN_PROGRESS` is blocked for supervisor-assigned tickets.
 
-## 👤 Author
-**Vishuddhanand Manjhi**
-- GitHub: [@VishuManjhi](https://github.com/VishuManjhi)
-- Project: [OmniSync-Agent-Monitor](https://github.com/VishuManjhi/OmniSync-Agent-Monitor)
+## Report Centre: Data + Excel Flow
+- Frontend component: `frontend-react/src/components/dashboard/supervisor/ReportCentre.tsx`
+- Report API source: `backend/controllers/analyticsController.js` (`buildAgentReportMetrics`)
+- Data is produced using MongoDB aggregation pipelines (`Ticket.aggregate`, `Session.aggregate`) for totals, attendance, and AHT.
+- Excel generation uses `ExcelJS` workbook creation (`buildWorkbookBuffer`) and is returned as `.xlsx` bytes by export endpoint.
 
----
-<p align="center"><sub>🚀 Built for performance, designed for collaboration.</sub></p>
+## Async Queue (SQS + Worker)
+- Async job types: `EXCEL_EXPORT`, `EMAIL_REPORT`, `NOTIFICATION`.
+- API enqueues jobs and returns `202` with `jobId`.
+- Worker (`backend/workers/sqsWorker.js`) consumes SQS messages, processes jobs, and updates `AsyncJob` status.
+- Export jobs generate file under `backend/uploads/reports` and expose `downloadUrl` in job result.
+
+## Aggregation Pipelines (Current)
+Total: **8**
+- `analyticsController.js`: 7 pipelines (report metrics, queue stats, agent analytics)
+- `agentController.js`: 1 pipeline (latest session per agent)
+
+## Security Notes
+- Helmet + HPP enabled.
+- Rate limiting enabled for `/api/*` (OPTIONS preflight excluded).
+- Zod request validation for critical endpoints.
+- JWT auth via Passport.
+
+## Development Notes
+- Runtime artifacts (logs, txt dumps, uploads) are ignored by `.gitignore`.
+- Keep `backend/uploads/.gitkeep` to preserve folder structure.
+
+## Author
+Vishuddhanand Manjhi

@@ -4,6 +4,8 @@ import {
     LayoutDashboard,
     Users,
     FileText,
+    ListTodo,
+    Bot,
     ClipboardList,
     Activity,
     MessageSquare,
@@ -12,8 +14,8 @@ import {
 import { styles } from '../agent/agentDashboardStyles';
 
 interface SupervisorSideNavProps {
-    activeView: 'MONITOR' | 'AGENTS' | 'REPORTS' | 'ACTIVITY' | 'WORKSTATION' | 'MESSAGING';
-    setActiveView: (view: 'MONITOR' | 'AGENTS' | 'REPORTS' | 'ACTIVITY' | 'WORKSTATION' | 'MESSAGING') => void;
+    activeView: 'MONITOR' | 'AGENTS' | 'REPORTS' | 'JOBS' | 'AUTOMATION' | 'ACTIVITY' | 'WORKSTATION' | 'MESSAGING';
+    setActiveView: (view: 'MONITOR' | 'AGENTS' | 'REPORTS' | 'JOBS' | 'AUTOMATION' | 'ACTIVITY' | 'WORKSTATION' | 'MESSAGING') => void;
     supervisorId?: string;
     logout: () => void;
 }
@@ -49,6 +51,20 @@ const SupervisorSideNav: React.FC<SupervisorSideNavProps> = ({ activeView, setAc
                     className={activeView === 'REPORTS' ? 'nav-item-active' : ''}
                 >
                     <FileText size={20} /> Report Centre
+                </button>
+                <button
+                    onClick={() => setActiveView('JOBS')}
+                    style={{ ...styles.navItem, ...(activeView === 'JOBS' ? styles.navItemActive : {}) }}
+                    className={activeView === 'JOBS' ? 'nav-item-active' : ''}
+                >
+                    <ListTodo size={20} /> Job Status
+                </button>
+                <button
+                    onClick={() => setActiveView('AUTOMATION')}
+                    style={{ ...styles.navItem, ...(activeView === 'AUTOMATION' ? styles.navItemActive : {}) }}
+                    className={activeView === 'AUTOMATION' ? 'nav-item-active' : ''}
+                >
+                    <Bot size={20} /> SLA Automation
                 </button>
                 <button
                     onClick={() => setActiveView('ACTIVITY')}

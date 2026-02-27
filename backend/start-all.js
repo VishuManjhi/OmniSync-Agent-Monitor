@@ -1,9 +1,11 @@
 import { spawn } from 'child_process';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import dotenv from 'dotenv';
 import { getDb } from './db.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+dotenv.config({ path: path.resolve(__dirname, '..', '.env') });
 const MAX_RESTARTS = 5;
 let shuttingDown = false;
 
@@ -51,6 +53,10 @@ const servers = [
     { name: 'API Server', path: './servers/api-server.js' },
     { name: 'WS Server', path: './servers/ws-server.js' }
 ];
+
+if (process.env.SQS_QUEUE_URL) {
+    servers.push({ name: 'SQS Worker', path: './workers/sqsWorker.js' });
+}
 
 function startServer(server, attempt = 0) {
     console.log(`Starting ${server.name}${attempt > 0 ? ` (retry ${attempt})` : ''}...`);

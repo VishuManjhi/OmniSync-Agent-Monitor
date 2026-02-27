@@ -9,6 +9,8 @@ type Period = 'weekly' | 'monthly';
 interface ReportCentreProps {
     agents: Agent[];
     sessions: AgentSession[];
+    preselectedAgentId?: string | null;
+    onJobTriggered?: () => void;
 }
 
 const deriveAgentStatus = (session?: AgentSession) => {
@@ -25,11 +27,15 @@ const formatAHT = (seconds: number) => {
     return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
 };
 
-const ReportCentre: React.FC<ReportCentreProps> = ({ agents, sessions }) => {
-    const [search, setSearch] = useState('');
-    const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null);
+const ReportCentre: React.FC<ReportCentreProps> = ({ agents, sessions, preselectedAgentId, onJobTriggered }) => {
+    const initialPreselectedAgent = preselectedAgentId
+        ? agents.find(a => a.agentId === preselectedAgentId) || null
+        : null;
+
+    const [search, setSearch] = useState(initialPreselectedAgent?.name || initialPreselectedAgent?.agentId || '');
+    const [selectedAgentId, setSelectedAgentId] = useState<string | null>(initialPreselectedAgent?.agentId || null);
     const [period, setPeriod] = useState<Period>('weekly');
-    const [editableEmail, setEditableEmail] = useState('');
+    const [editableEmail, setEditableEmail] = useState(initialPreselectedAgent?.email || '');
     const { showNotification } = useNotification();
 
     const filteredAgents = useMemo(() => {
@@ -61,6 +67,7 @@ const ReportCentre: React.FC<ReportCentreProps> = ({ agents, sessions }) => {
         mutationFn: () => emailAgentReport(selectedAgentId!, period),
         onSuccess: (res) => {
             showNotification(`Report mailed to ${res.sentTo}`, 'success', 'REPORT SENT');
+            onJobTriggered?.();
         },
         onError: (err: unknown) => {
             const message = err instanceof Error ? err.message : 'Failed to send report';
@@ -91,6 +98,7 @@ const ReportCentre: React.FC<ReportCentreProps> = ({ agents, sessions }) => {
             link.click();
             URL.revokeObjectURL(url);
             showNotification('Excel report generated', 'success', 'REPORT READY');
+            onJobTriggered?.();
         } catch (err: unknown) {
             const message = err instanceof Error ? err.message : 'Failed to export report';
             showNotification(message, 'error', 'REPORT ERROR');
@@ -119,7 +127,7 @@ const ReportCentre: React.FC<ReportCentreProps> = ({ agents, sessions }) => {
                 />
             </section>
 
-            {!search.trim() ? (
+            {!search.trim() && !selectedAgent ? (
                 <section className="glass-card" style={{ padding: '2.2rem', borderRadius: '14px', textAlign: 'center' }}>
                     <h3 style={{ color: 'var(--text-primary)', fontSize: '1rem', marginBottom: '0.5rem' }}>Search for any agent</h3>
                     <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>Use the search box above to find an agent and generate report insights.</p>

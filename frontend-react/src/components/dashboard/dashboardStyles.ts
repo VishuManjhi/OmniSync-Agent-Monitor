@@ -90,6 +90,8 @@ export const styles: Record<string, React.CSSProperties> = {
         display: 'flex',
         justifyContent: 'space-between',
         alignItems: 'center',
+        gap: '0.75rem',
+        flexWrap: 'wrap',
     },
     searchBox: {
         position: 'relative',
@@ -99,7 +101,7 @@ export const styles: Record<string, React.CSSProperties> = {
         border: '1px solid var(--glass-border)',
         borderRadius: '10px',
         padding: '0 12px',
-        width: '300px',
+        width: 'min(100%, 360px)',
     },
     searchInput: {
         background: 'transparent',
@@ -120,7 +122,7 @@ export const styles: Record<string, React.CSSProperties> = {
     },
     grid: {
         display: 'grid',
-        gridTemplateColumns: 'repeat(4, 1fr)',
+        gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))',
         gap: '1rem',
     },
     agentCard: {

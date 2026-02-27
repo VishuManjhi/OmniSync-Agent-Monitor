@@ -46,21 +46,23 @@ const limiter = rateLimit({
   message: { error: 'TOO_MANY_REQUESTS', message: 'Too many requests from this IP, please try again after 15 minutes' },
   standardHeaders: true,
   legacyHeaders: false,
+  skip: (req) => req.method === 'OPTIONS'
 });
-
-// Apply rate limiter to all routes
-app.use('/api/', limiter);
-
-// Prevent HTTP Parameter Pollution
-app.use(hpp());
 
 // ── BASIC SETUP ──
 // TODO: Replace wildcard with specific production origin whitelist
 app.use(cors({
   origin: process.env.ALLOWED_ORIGINS ? process.env.ALLOWED_ORIGINS.split(',') : '*',
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization']
+  allowedHeaders: ['Content-Type', 'Authorization'],
+  optionsSuccessStatus: 204
 }));
+
+// Apply rate limiter to all API routes (after CORS so preflight always gets CORS headers)
+// app.use('/api/', limiter); // Disabled temporarily for local testing
+
+// Prevent HTTP Parameter Pollution
+app.use(hpp());
 app.use(express.json({ limit: '5mb' })); // Reduced limit from 10mb for better protection
 
 // Setup __dirname for ES modules
