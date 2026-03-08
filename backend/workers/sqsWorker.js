@@ -6,6 +6,13 @@ import { DeleteMessageCommand, ReceiveMessageCommand } from '@aws-sdk/client-sqs
 import { connectDb } from '../db.js';
 import AsyncJob from '../models/AsyncJob.js';
 import Message from '../models/Message.js';
+import { initRedis } from '../services/redisClient.js';
+
+// Initialize Redis in worker process if available
+await initRedis().catch(err => {
+    console.warn('[SQS WORKER] Redis init failed (continuing without cache):', err);
+});
+import { invalidatePattern } from '../services/cacheService.js';
 import { buildAgentReportMetrics, buildWorkbookBuffer, sendReportEmail } from '../services/reportService.js';
 import { isSqsConfigured, sqsClient, sqsQueueUrl } from '../services/sqsClient.js';
 
@@ -38,6 +45,7 @@ const processJob = async ({ jobId, type, payload }) => {
             period: report.period
         };
         await job.save();
+        try { await invalidatePattern('asyncjobs:*'); } catch (e) { console.warn('[CACHE] invalidate asyncjobs failed', e); }
         return;
     }
 
@@ -53,6 +61,7 @@ const processJob = async ({ jobId, type, payload }) => {
             period: report.period
         };
         await job.save();
+        try { await invalidatePattern('asyncjobs:*'); } catch (e) { console.warn('[CACHE] invalidate asyncjobs failed', e); }
         return;
     }
 
@@ -70,6 +79,7 @@ const processJob = async ({ jobId, type, payload }) => {
         job.status = 'COMPLETED';
         job.result = { messageId };
         await job.save();
+        try { await invalidatePattern('asyncjobs:*'); } catch (e) { console.warn('[CACHE] invalidate asyncjobs failed', e); }
         return;
     }
 
@@ -113,6 +123,7 @@ const runWorker = async () => {
                             { jobId: body.jobId },
                             { $set: { status: 'FAILED', error: jobErr instanceof Error ? jobErr.message : 'UNKNOWN_ERROR' } }
                         );
+                        try { await invalidatePattern('asyncjobs:*'); } catch (e) { console.warn('[CACHE] invalidate asyncjobs failed', e); }
                     }
                     console.error('[SQS WORKER] Job failed:', jobErr);
                 }

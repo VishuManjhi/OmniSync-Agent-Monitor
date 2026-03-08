@@ -8,6 +8,7 @@ import rateLimit from 'express-rate-limit';
 import hpp from 'hpp';
 import { connectDb } from '../db.js';
 import passportConfig from '../passport.js';
+import { initRedis } from '../services/redisClient.js';
 
 // Route Imports
 import authRoutes from '../routes/authRoutes.js';
@@ -79,6 +80,11 @@ app.use(passport.initialize());
 const authenticateToken = passport.authenticate('jwt', { session: false });
 
 // ── DATABASE ──
+// Initialize Redis (optional) and connect DB
+await initRedis().catch(err => {
+  console.warn('[API] Redis init failed (continuing without cache):', err);
+});
+
 connectDb().catch(err => {
   console.error('[API] Failed to connect to DB:', err);
 });

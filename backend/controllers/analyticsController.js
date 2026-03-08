@@ -5,6 +5,7 @@ import AsyncJob from '../models/AsyncJob.js';
 import Agent from '../models/Agent.js';
 import mongoose from 'mongoose';
 import { enqueueAsyncJob } from '../services/queueService.js';
+import { getOrSet, invalidatePattern, acquireLock, releaseLock } from '../services/cacheService.js';
 import { buildAgentReportMetrics, buildWorkbookBuffer } from '../services/reportService.js';
 
 const resolveAgent = async (agentKey) => {
@@ -360,35 +361,40 @@ export const listAsyncJobs = async (req, res, next) => {
         const skip = (page - 1) * limit;
         const status = req.query.status ? String(req.query.status) : null;
         const type = req.query.type ? String(req.query.type) : null;
-
         const query = {};
         if (status) query.status = status;
         if (type) query.type = type;
 
-        const [total, jobs] = await Promise.all([
-            AsyncJob.countDocuments(query),
-            AsyncJob.find(query)
-                .sort({ createdAt: -1 })
-                .skip(skip)
-                .limit(limit)
-                .lean()
-        ]);
+        const cacheKey = `asyncjobs:page=${page}:limit=${limit}:type=${type||''}:status=${status||''}`;
 
-        res.json({
-            total,
-            pages: Math.max(Math.ceil(total / limit), 1),
-            currentPage: page,
-            items: jobs.map(job => ({
-                jobId: job.jobId,
-                type: job.type,
-                status: job.status,
-                result: job.result,
-                error: job.error,
-                attempts: job.attempts,
-                createdAt: job.createdAt,
-                updatedAt: job.updatedAt
-            }))
+        const payload = await getOrSet(cacheKey, 15, async () => {
+            const [total, jobs] = await Promise.all([
+                AsyncJob.countDocuments(query),
+                AsyncJob.find(query)
+                    .sort({ createdAt: -1 })
+                    .skip(skip)
+                    .limit(limit)
+                    .lean()
+            ]);
+
+            return {
+                total,
+                pages: Math.max(Math.ceil(total / limit), 1),
+                currentPage: page,
+                items: jobs.map(job => ({
+                    jobId: job.jobId,
+                    type: job.type,
+                    status: job.status,
+                    result: job.result,
+                    error: job.error,
+                    attempts: job.attempts,
+                    createdAt: job.createdAt,
+                    updatedAt: job.updatedAt
+                }))
+            };
         });
+
+        res.json(payload);
     } catch (err) {
         next(err);
     }
@@ -406,23 +412,29 @@ export const getSlaBreaches = async (req, res, next) => {
             status: { $nin: ['RESOLVED', 'REJECTED'] }
         };
 
-        const [total, breaches] = await Promise.all([
-            Ticket.countDocuments(query),
-            Ticket.find(query)
-                .sort({ issueDateTime: 1 })
-                .skip(skip)
-                .limit(limit)
-                .lean()
-        ]);
+        const cacheKey = `sla:hours=${hours}:page=${page}:limit=${limit}`;
 
-        res.json({
-            hours,
-            threshold: breachThreshold,
-            total,
-            pages: Math.max(Math.ceil(total / limit), 1),
-            currentPage: page,
-            breaches
+        const payload = await getOrSet(cacheKey, 30, async () => {
+            const [total, breaches] = await Promise.all([
+                Ticket.countDocuments(query),
+                Ticket.find(query)
+                    .sort({ issueDateTime: 1 })
+                    .skip(skip)
+                    .limit(limit)
+                    .lean()
+            ]);
+
+            return {
+                hours,
+                threshold: breachThreshold,
+                total,
+                pages: Math.max(Math.ceil(total / limit), 1),
+                currentPage: page,
+                breaches
+            };
         });
+
+        res.json(payload);
     } catch (err) {
         next(err);
     }
@@ -433,35 +445,55 @@ export const runSlaAutomation = async (req, res, next) => {
         const hours = Math.max(parseInt(req.body?.hours, 10) || 24, 1);
         const breachThreshold = Date.now() - (hours * 60 * 60 * 1000);
 
-        const breachedTickets = await Ticket.find({
-            issueDateTime: { $lt: breachThreshold },
-            status: { $nin: ['RESOLVED', 'REJECTED'] }
-        }).lean();
-
-        if (!breachedTickets.length) {
-            return res.json({ ok: true, escalated: 0, notified: false });
+        // Acquire a distributed lock to avoid concurrent SLA runs
+        const lockKey = 'sla:lock';
+        const { ok: lockAcquired, token } = await acquireLock(lockKey, 5 * 60 * 1000);
+        if (!lockAcquired) {
+            return res.status(409).json({ error: 'SLA_RUN_IN_PROGRESS' });
         }
 
-        const ticketIds = breachedTickets.map(t => t.ticketId);
+        try {
+            const breachedTickets = await Ticket.find({
+                issueDateTime: { $lt: breachThreshold },
+                status: { $nin: ['RESOLVED', 'REJECTED'] }
+            }).lean();
 
-        await Ticket.updateMany(
-            { ticketId: { $in: ticketIds } },
-            { $set: { priority: 'URGENT' } }
-        );
+            if (!breachedTickets.length) {
+                return res.json({ ok: true, escalated: 0, notified: false });
+            }
 
-        const notificationMessage = `SLA automation escalated ${ticketIds.length} breached ticket(s) older than ${hours}h.`;
-        await enqueueAsyncJob('NOTIFICATION', {
-            senderId: req.user?.agentId || req.user?.id || 'system',
-            receiverId: null,
-            content: notificationMessage
-        });
+            const ticketIds = breachedTickets.map(t => t.ticketId);
 
-        res.json({
-            ok: true,
-            escalated: ticketIds.length,
-            notified: true,
-            ticketIds
-        });
+            await Ticket.updateMany(
+                { ticketId: { $in: ticketIds } },
+                { $set: { priority: 'URGENT' } }
+            );
+
+            // Invalidate relevant caches so UI reflects the escalations quickly
+            try {
+                await invalidatePattern('sla:*');
+                await invalidatePattern('queue:*');
+                await invalidatePattern('asyncjobs:*');
+            } catch (e) {
+                console.warn('[CACHE] Invalidation during SLA run failed', e);
+            }
+
+            const notificationMessage = `SLA automation escalated ${ticketIds.length} breached ticket(s) older than ${hours}h.`;
+            await enqueueAsyncJob('NOTIFICATION', {
+                senderId: req.user?.agentId || req.user?.id || 'system',
+                receiverId: null,
+                content: notificationMessage
+            });
+
+            return res.json({
+                ok: true,
+                escalated: ticketIds.length,
+                notified: true,
+                ticketIds
+            });
+        } finally {
+            await releaseLock(lockKey, token);
+        }
     } catch (err) {
         next(err);
     }

@@ -4,6 +4,7 @@ import nodemailer from 'nodemailer';
 import Agent from '../models/Agent.js';
 import Ticket from '../models/Ticket.js';
 import Session from '../models/Session.js';
+import { getOrSet } from './cacheService.js';
 
 const getRangeStart = (period) => {
     const now = Date.now();
@@ -21,91 +22,95 @@ const resolveAgent = async (agentKey) => {
 };
 
 export const buildAgentReportMetrics = async (agentId, period = 'weekly') => {
-    const since = getRangeStart(period);
-    const agent = await resolveAgent(agentId);
+    const cacheKey = `agent:report:${String(agentId).toLowerCase()}:period=${period}`;
 
-    if (!agent) {
-        const err = new Error('AGENT_NOT_FOUND');
-        err.statusCode = 404;
-        throw err;
-    }
+    return await getOrSet(cacheKey, 300, async () => {
+        const since = getRangeStart(period);
+        const agent = await resolveAgent(agentId);
 
-    const canonicalAgentId = agent.agentId;
+        if (!agent) {
+            const err = new Error('AGENT_NOT_FOUND');
+            err.statusCode = 404;
+            throw err;
+        }
 
-    const [ticketAgg, attendanceAgg, liveSession] = await Promise.all([
-        Ticket.aggregate([
-            { $match: { agentId: canonicalAgentId, issueDateTime: { $gte: since } } },
+        const canonicalAgentId = agent.agentId;
+
+        const [ticketAgg, attendanceAgg, liveSession] = await Promise.all([
+            Ticket.aggregate([
+                { $match: { agentId: canonicalAgentId, issueDateTime: { $gte: since } } },
+                {
+                    $group: {
+                        _id: null,
+                        totalRaised: { $sum: 1 },
+                        totalResolved: { $sum: { $cond: [{ $eq: ['$status', 'RESOLVED'] }, 1, 0] } },
+                        totalRejected: { $sum: { $cond: [{ $eq: ['$status', 'REJECTED'] }, 1, 0] } }
+                    }
+                }
+            ]),
+            Session.aggregate([
+                { $match: { agentId: canonicalAgentId, clockInTime: { $gte: since } } },
+                {
+                    $project: {
+                        duration: {
+                            $subtract: [{ $ifNull: ['$clockOutTime', Date.now()] }, '$clockInTime']
+                        }
+                    }
+                },
+                { $group: { _id: null, totalDurationMs: { $sum: '$duration' } } }
+            ]),
+            Session.findOne({ agentId: canonicalAgentId, clockOutTime: null }).sort({ clockInTime: -1 }).lean()
+        ]);
+
+        const ahtAgg = await Ticket.aggregate([
+            {
+                $match: {
+                    agentId: canonicalAgentId,
+                    status: 'RESOLVED',
+                    startedAt: { $gt: 0 },
+                    resolvedAt: { $gte: since }
+                }
+            },
             {
                 $group: {
                     _id: null,
-                    totalRaised: { $sum: 1 },
-                    totalResolved: { $sum: { $cond: [{ $eq: ['$status', 'RESOLVED'] }, 1, 0] } },
-                    totalRejected: { $sum: { $cond: [{ $eq: ['$status', 'REJECTED'] }, 1, 0] } }
+                    totalTime: { $sum: { $subtract: ['$resolvedAt', '$startedAt'] } },
+                    count: { $sum: 1 }
                 }
             }
-        ]),
-        Session.aggregate([
-            { $match: { agentId: canonicalAgentId, clockInTime: { $gte: since } } },
-            {
-                $project: {
-                    duration: {
-                        $subtract: [{ $ifNull: ['$clockOutTime', Date.now()] }, '$clockInTime']
-                    }
-                }
-            },
-            { $group: { _id: null, totalDurationMs: { $sum: '$duration' } } }
-        ]),
-        Session.findOne({ agentId: canonicalAgentId, clockOutTime: null }).sort({ clockInTime: -1 }).lean()
-    ]);
+        ]);
 
-    const ahtAgg = await Ticket.aggregate([
-        {
-            $match: {
+        const totals = ticketAgg[0] || { totalRaised: 0, totalResolved: 0, totalRejected: 0 };
+        const totalAttendanceHours = Number((((attendanceAgg[0]?.totalDurationMs || 0) / (1000 * 60 * 60)).toFixed(2)));
+        const avgHandleTimeSeconds = ahtAgg[0] ? Math.floor(ahtAgg[0].totalTime / ahtAgg[0].count / 1000) : 0;
+        const slaPercent = totals.totalRaised ? Number(((totals.totalResolved / totals.totalRaised) * 100).toFixed(2)) : 0;
+
+        const status = !liveSession || liveSession.clockOutTime
+            ? 'OFFLINE'
+            : (liveSession.breaks?.some?.(b => !b.breakOut)
+                ? 'ON_BREAK'
+                : (liveSession.onCall ? 'ON_CALL' : 'ACTIVE'));
+
+        return {
+            period,
+            from: since,
+            to: Date.now(),
+            agent: {
                 agentId: canonicalAgentId,
-                status: 'RESOLVED',
-                startedAt: { $gt: 0 },
-                resolvedAt: { $gte: since }
+                name: agent?.name || canonicalAgentId,
+                email: agent?.email || null,
+                status
+            },
+            metrics: {
+                totalRaised: totals.totalRaised,
+                totalResolved: totals.totalResolved,
+                totalRejected: totals.totalRejected,
+                attendanceHours: totalAttendanceHours,
+                avgHandleTimeSeconds,
+                slaPercent
             }
-        },
-        {
-            $group: {
-                _id: null,
-                totalTime: { $sum: { $subtract: ['$resolvedAt', '$startedAt'] } },
-                count: { $sum: 1 }
-            }
-        }
-    ]);
-
-    const totals = ticketAgg[0] || { totalRaised: 0, totalResolved: 0, totalRejected: 0 };
-    const totalAttendanceHours = Number((((attendanceAgg[0]?.totalDurationMs || 0) / (1000 * 60 * 60)).toFixed(2)));
-    const avgHandleTimeSeconds = ahtAgg[0] ? Math.floor(ahtAgg[0].totalTime / ahtAgg[0].count / 1000) : 0;
-    const slaPercent = totals.totalRaised ? Number(((totals.totalResolved / totals.totalRaised) * 100).toFixed(2)) : 0;
-
-    const status = !liveSession || liveSession.clockOutTime
-        ? 'OFFLINE'
-        : (liveSession.breaks?.some?.(b => !b.breakOut)
-            ? 'ON_BREAK'
-            : (liveSession.onCall ? 'ON_CALL' : 'ACTIVE'));
-
-    return {
-        period,
-        from: since,
-        to: Date.now(),
-        agent: {
-            agentId: canonicalAgentId,
-            name: agent?.name || canonicalAgentId,
-            email: agent?.email || null,
-            status
-        },
-        metrics: {
-            totalRaised: totals.totalRaised,
-            totalResolved: totals.totalResolved,
-            totalRejected: totals.totalRejected,
-            attendanceHours: totalAttendanceHours,
-            avgHandleTimeSeconds,
-            slaPercent
-        }
-    };
+        };
+    });
 };
 
 export const buildWorkbookBuffer = async (report) => {

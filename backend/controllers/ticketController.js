@@ -2,6 +2,7 @@ import Ticket from '../models/Ticket.js';
 import Agent from '../models/Agent.js';
 import mongoose from 'mongoose';
 import { saveFileFromBase64 } from '../services/fileStorage.js';
+import { invalidatePattern } from '../services/cacheService.js';
 
 /**
  * Create or upsert a ticket
@@ -26,6 +27,17 @@ export const createTicket = async (req, res, next) => {
             { $set: ticketData },
             { upsert: true }
         );
+
+        // Invalidate caches that depend on tickets
+        try {
+            if (ticketData?.agentId) {
+                await invalidatePattern(`agent:report:${ticketData.agentId}:*`);
+            }
+            await invalidatePattern('sla:*');
+            await invalidatePattern('queue:*');
+        } catch (e) {
+            console.warn('[CACHE] Invalidate after createTicket failed', e);
+        }
 
         res.status(200).json({ ok: true });
     } catch (err) {
@@ -207,6 +219,17 @@ export const updateTicket = async (req, res, next) => {
 
         if (!result.matchedCount) {
             return res.status(404).json({ error: 'NOT_FOUND' });
+        }
+
+        // Invalidate caches that depend on tickets
+        try {
+            if (existingTicket?.agentId) {
+                await invalidatePattern(`agent:report:${existingTicket.agentId}:*`);
+            }
+            await invalidatePattern('sla:*');
+            await invalidatePattern('queue:*');
+        } catch (e) {
+            console.warn('[CACHE] Invalidate after updateTicket failed', e);
         }
 
         res.json({ ok: true });

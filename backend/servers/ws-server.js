@@ -2,6 +2,7 @@ import { Server } from 'socket.io';
 import http from 'http';
 import crypto from 'crypto';
 import { connectDb } from '../db.js';
+import { initRedis } from '../services/redisClient.js';
 import Message from '../models/Message.js';
 
 const server = http.createServer();
@@ -15,6 +16,11 @@ const io = new Server(server, {
 const PORT = 8080;
 
 // Connect to DB for message persistence
+// Initialize Redis (optional) then connect DB
+await initRedis().catch(err => {
+    console.warn('[WS] Redis init failed (continuing without cache):', err);
+});
+
 connectDb().catch(err => {
     console.error('[WS] Failed to connect to DB:', err);
 });

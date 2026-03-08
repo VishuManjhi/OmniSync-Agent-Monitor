@@ -3,6 +3,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
 import { getDb } from './db.js';
+import { initRedis } from './services/redisClient.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 dotenv.config({ path: path.resolve(__dirname, '..', '.env') });
@@ -99,6 +100,8 @@ function cleanup() {
 }
 
 // Seed first, then start servers
+// Initialize Redis (optional) then seed database
+await initRedis();
 await seedDatabase();
 
 servers.forEach(server => {

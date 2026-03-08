@@ -19,13 +19,13 @@ async function runTests() {
         });
         const data = await res.json();
         if (res.status === 400 && data.error === 'VALIDATION_ERROR') {
-            console.log('✅ PASS: Rejected invalid ticket with 400 VALIDATION_ERROR');
+            console.log(' PASS: Rejected invalid ticket with 400 VALIDATION_ERROR');
         } else {
-            console.log(`❌ FAIL: Expected 400, got ${res.status}`);
+            console.log(` FAIL: Expected 400, got ${res.status}`);
             console.log(data);
         }
     } catch (err) {
-        console.log('❌ FAIL: Request error', err.message);
+        console.log(' FAIL: Request error', err.message);
     }
 
     // Test 2: Validation - Missing Auth Fields
@@ -38,12 +38,12 @@ async function runTests() {
         });
         const data = await res.json();
         if (res.status === 400 && data.error === 'VALIDATION_ERROR') {
-            console.log('✅ PASS: Rejected incomplete auth payload');
+            console.log(' PASS: Rejected incomplete auth payload');
         } else {
-            console.log(`❌ FAIL: Expected 400, got ${res.status}`);
+            console.log(` FAIL: Expected 400, got ${res.status}`);
         }
     } catch (err) {
-        console.log('❌ FAIL: Request error', err.message);
+        console.log(' FAIL: Request error', err.message);
     }
 
     console.log('\n--- Manual Verification Steps ---');
