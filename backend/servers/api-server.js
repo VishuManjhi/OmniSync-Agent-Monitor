@@ -51,7 +51,7 @@ const limiter = rateLimit({
 });
 
 // ── BASIC SETUP ──
-// TODO: Replace wildcard with specific production origin whitelist
+// Replace wildcard with specific production origin whitelist
 app.use(cors({
   origin: process.env.ALLOWED_ORIGINS ? process.env.ALLOWED_ORIGINS.split(',') : '*',
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],

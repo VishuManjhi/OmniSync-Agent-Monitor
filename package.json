@@ -5,6 +5,7 @@
   "scripts": {
     "start": "node backend/start-all.js",
     "dev": "npm run clear-ports && node backend/start-all.js",
+    "seed:bulk": "node backend/seed_bulk.js",
     "worker:sqs": "node backend/workers/sqsWorker.js",
     "clear-ports": "powershell \"@(3003,8080) | % { $conn = Get-NetTCPConnection -LocalPort $_ -ErrorAction SilentlyContinue; if ($conn) { $pids = @($conn | Select-Object -ExpandProperty OwningProcess -Unique) | Where-Object { $_ -gt 4 }; foreach ($targetPid in $pids) { Stop-Process -Id $targetPid -Force -ErrorAction SilentlyContinue } } }\""
   },

@@ -1,11 +1,10 @@
 import Ticket from '../models/Ticket.js';
 import Session from '../models/Session.js';
 import Message from '../models/Message.js';
-import AsyncJob from '../models/AsyncJob.js';
 import Agent from '../models/Agent.js';
 import mongoose from 'mongoose';
-import { enqueueAsyncJob } from '../services/queueService.js';
-import { getOrSet, invalidatePattern, acquireLock, releaseLock } from '../services/cacheService.js';
+import { getAsyncJobStatusById, listAsyncJobsData, enqueueEmailReportJob, enqueueExportReportJob, enqueueNotificationJob } from '../services/jobService.js';
+import { getSlaBreachesData, runSlaAutomationData } from '../services/slaService.js';
 import { buildAgentReportMetrics, buildWorkbookBuffer } from '../services/reportService.js';
 
 const resolveAgent = async (agentKey) => {
@@ -281,7 +280,7 @@ export const emailAgentReport = async (req, res, next) => {
         const { agentId } = req.params;
         const period = req.body?.period === 'monthly' ? 'monthly' : 'weekly';
 
-        const job = await enqueueAsyncJob('EMAIL_REPORT', {
+        const job = await enqueueEmailReportJob({
             agentId,
             period,
             requestedBy: req.user?.agentId || req.user?.id || 'system'
@@ -298,7 +297,7 @@ export const enqueueAgentReportExport = async (req, res, next) => {
         const { agentId } = req.params;
         const period = req.body?.period === 'monthly' ? 'monthly' : 'weekly';
 
-        const job = await enqueueAsyncJob('EXCEL_EXPORT', {
+        const job = await enqueueExportReportJob({
             agentId,
             period,
             requestedBy: req.user?.agentId || req.user?.id || 'system'
@@ -312,88 +311,41 @@ export const enqueueAgentReportExport = async (req, res, next) => {
 
 export const enqueueNotification = async (req, res, next) => {
     try {
-        const content = String(req.body?.content || '').trim();
-        const receiverId = req.body?.receiverId ? String(req.body.receiverId) : null;
-
-        if (!content) {
-            return res.status(400).json({ error: 'CONTENT_REQUIRED' });
-        }
-
-        const job = await enqueueAsyncJob('NOTIFICATION', {
+        const job = await enqueueNotificationJob({
             senderId: req.user?.agentId || req.user?.id || 'system',
-            receiverId,
-            content
+            receiverId: req.body?.receiverId ? String(req.body.receiverId) : null,
+            content: req.body?.content
         });
 
         res.status(202).json({ ok: true, ...job });
     } catch (err) {
+        if (err?.statusCode === 400 && err?.message === 'CONTENT_REQUIRED') {
+            return res.status(400).json({ error: 'CONTENT_REQUIRED' });
+        }
         next(err);
     }
 };
 
 export const getAsyncJobStatus = async (req, res, next) => {
     try {
-        const { jobId } = req.params;
-        const job = await AsyncJob.findOne({ jobId }).lean();
-
-        if (!job) {
+        const payload = await getAsyncJobStatusById(req.params.jobId);
+        res.json(payload);
+    } catch (err) {
+        if (err?.statusCode === 404 && err?.message === 'JOB_NOT_FOUND') {
             return res.status(404).json({ error: 'JOB_NOT_FOUND' });
         }
-
-        res.json({
-            jobId: job.jobId,
-            type: job.type,
-            status: job.status,
-            result: job.result,
-            error: job.error,
-            attempts: job.attempts,
-            updatedAt: job.updatedAt
-        });
-    } catch (err) {
         next(err);
     }
 };
 
 export const listAsyncJobs = async (req, res, next) => {
     try {
-        const page = Math.max(parseInt(req.query.page, 10) || 1, 1);
-        const limit = Math.min(parseInt(req.query.limit, 10) || 25, 100);
-        const skip = (page - 1) * limit;
-        const status = req.query.status ? String(req.query.status) : null;
-        const type = req.query.type ? String(req.query.type) : null;
-        const query = {};
-        if (status) query.status = status;
-        if (type) query.type = type;
-
-        const cacheKey = `asyncjobs:page=${page}:limit=${limit}:type=${type||''}:status=${status||''}`;
-
-        const payload = await getOrSet(cacheKey, 15, async () => {
-            const [total, jobs] = await Promise.all([
-                AsyncJob.countDocuments(query),
-                AsyncJob.find(query)
-                    .sort({ createdAt: -1 })
-                    .skip(skip)
-                    .limit(limit)
-                    .lean()
-            ]);
-
-            return {
-                total,
-                pages: Math.max(Math.ceil(total / limit), 1),
-                currentPage: page,
-                items: jobs.map(job => ({
-                    jobId: job.jobId,
-                    type: job.type,
-                    status: job.status,
-                    result: job.result,
-                    error: job.error,
-                    attempts: job.attempts,
-                    createdAt: job.createdAt,
-                    updatedAt: job.updatedAt
-                }))
-            };
+        const payload = await listAsyncJobsData({
+            page: req.query.page,
+            limit: req.query.limit,
+            status: req.query.status,
+            type: req.query.type
         });
-
         res.json(payload);
     } catch (err) {
         next(err);
@@ -402,38 +354,11 @@ export const listAsyncJobs = async (req, res, next) => {
 
 export const getSlaBreaches = async (req, res, next) => {
     try {
-        const hours = Math.max(parseInt(req.query.hours, 10) || 24, 1);
-        const page = Math.max(parseInt(req.query.page, 10) || 1, 1);
-        const limit = Math.min(parseInt(req.query.limit, 10) || 10, 100);
-        const skip = (page - 1) * limit;
-        const breachThreshold = Date.now() - (hours * 60 * 60 * 1000);
-        const query = {
-            issueDateTime: { $lt: breachThreshold },
-            status: { $nin: ['RESOLVED', 'REJECTED'] }
-        };
-
-        const cacheKey = `sla:hours=${hours}:page=${page}:limit=${limit}`;
-
-        const payload = await getOrSet(cacheKey, 30, async () => {
-            const [total, breaches] = await Promise.all([
-                Ticket.countDocuments(query),
-                Ticket.find(query)
-                    .sort({ issueDateTime: 1 })
-                    .skip(skip)
-                    .limit(limit)
-                    .lean()
-            ]);
-
-            return {
-                hours,
-                threshold: breachThreshold,
-                total,
-                pages: Math.max(Math.ceil(total / limit), 1),
-                currentPage: page,
-                breaches
-            };
+        const payload = await getSlaBreachesData({
+            hours: req.query.hours,
+            page: req.query.page,
+            limit: req.query.limit
         });
-
         res.json(payload);
     } catch (err) {
         next(err);
@@ -442,59 +367,15 @@ export const getSlaBreaches = async (req, res, next) => {
 
 export const runSlaAutomation = async (req, res, next) => {
     try {
-        const hours = Math.max(parseInt(req.body?.hours, 10) || 24, 1);
-        const breachThreshold = Date.now() - (hours * 60 * 60 * 1000);
-
-        // Acquire a distributed lock to avoid concurrent SLA runs
-        const lockKey = 'sla:lock';
-        const { ok: lockAcquired, token } = await acquireLock(lockKey, 5 * 60 * 1000);
-        if (!lockAcquired) {
+        const payload = await runSlaAutomationData({
+            hours: req.body?.hours,
+            requestedBy: req.user?.agentId || req.user?.id || 'system'
+        });
+        return res.json(payload);
+    } catch (err) {
+        if (err?.statusCode === 409 && err?.message === 'SLA_RUN_IN_PROGRESS') {
             return res.status(409).json({ error: 'SLA_RUN_IN_PROGRESS' });
         }
-
-        try {
-            const breachedTickets = await Ticket.find({
-                issueDateTime: { $lt: breachThreshold },
-                status: { $nin: ['RESOLVED', 'REJECTED'] }
-            }).lean();
-
-            if (!breachedTickets.length) {
-                return res.json({ ok: true, escalated: 0, notified: false });
-            }
-
-            const ticketIds = breachedTickets.map(t => t.ticketId);
-
-            await Ticket.updateMany(
-                { ticketId: { $in: ticketIds } },
-                { $set: { priority: 'URGENT' } }
-            );
-
-            // Invalidate relevant caches so UI reflects the escalations quickly
-            try {
-                await invalidatePattern('sla:*');
-                await invalidatePattern('queue:*');
-                await invalidatePattern('asyncjobs:*');
-            } catch (e) {
-                console.warn('[CACHE] Invalidation during SLA run failed', e);
-            }
-
-            const notificationMessage = `SLA automation escalated ${ticketIds.length} breached ticket(s) older than ${hours}h.`;
-            await enqueueAsyncJob('NOTIFICATION', {
-                senderId: req.user?.agentId || req.user?.id || 'system',
-                receiverId: null,
-                content: notificationMessage
-            });
-
-            return res.json({
-                ok: true,
-                escalated: ticketIds.length,
-                notified: true,
-                ticketIds
-            });
-        } finally {
-            await releaseLock(lockKey, token);
-        }
-    } catch (err) {
         next(err);
     }
 };

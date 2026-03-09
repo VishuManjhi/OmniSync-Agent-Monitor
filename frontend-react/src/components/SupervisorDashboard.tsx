@@ -286,10 +286,25 @@ const SupervisorDashboard: React.FC = () => {
     // Derived Statistics
     const currentAHT = stats?.avgHandleTime ? `${Math.floor(stats.avgHandleTime / 60)}:${(stats.avgHandleTime % 60).toString().padStart(2, '0')}` : '0:00';
 
-    const wsOnBreakCount = sessions.filter(s => !s.clockOutTime && s.breaks?.some(b => !b.breakOut)).length;
-    const wsOnCallCount = sessions.filter(s => !s.clockOutTime && s.onCall).length;
-    const wsActiveCount = sessions.filter(s => !s.clockOutTime).length - wsOnBreakCount - wsOnCallCount;
-    const wsOfflineCount = agents.length - sessions.filter(s => !s.clockOutTime).length;
+    const statusCounts = agents.reduce(
+        (acc, agent) => {
+            const session = sessions.find(s => s.agentId === agent.agentId);
+            const status = deriveAgentStatus(session);
+
+            if (status === 'ON_BREAK') acc.onBreak += 1;
+            else if (status === 'ON_CALL') acc.onCall += 1;
+            else if (status === 'ACTIVE') acc.active += 1;
+            else acc.offline += 1;
+
+            return acc;
+        },
+        { active: 0, onCall: 0, onBreak: 0, offline: 0 }
+    );
+
+    const wsOnBreakCount = Math.max(0, statusCounts.onBreak);
+    const wsOnCallCount = Math.max(0, statusCounts.onCall);
+    const wsActiveCount = Math.max(0, statusCounts.active);
+    const wsOfflineCount = Math.max(0, statusCounts.offline);
 
     // Use global stats from backend for ticket analytics, fallback to 0
     const wsResolvedCount = stats?.resolvedCount ?? 0;

@@ -41,9 +41,9 @@ export async function connectDb() {
       autoIndex: true,
     });
     isConnected = true;
-    console.log(`[DB] Connected to MongoDB: ${dbName}`);
+    console.log(`[DB][pid:${process.pid}] Connected to MongoDB: ${dbName}`);
   } catch (err) {
-    console.error('[DB] MongoDB connection error:', err);
+    console.error(`[DB][pid:${process.pid}] MongoDB connection error:`, err);
     throw err;
   }
 }

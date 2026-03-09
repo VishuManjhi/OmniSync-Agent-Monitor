@@ -6,19 +6,19 @@ let available = false;
 export async function initRedis() {
     const url = process.env.REDIS_URL || process.env.REDIS_URI;
     if (!url) {
-        console.warn('[REDIS] REDIS_URL not set — running without Redis.');
+        console.warn(`[REDIS][pid:${process.pid}] REDIS_URL not set — running without Redis.`);
         return;
     }
 
     client = createClient({ url });
     client.on('error', (err) => {
-        console.error('[REDIS] Client error', err);
+        console.error(`[REDIS][pid:${process.pid}] Client error`, err);
         available = false;
     });
 
     await client.connect();
     available = true;
-    console.log('[REDIS] Connected');
+    console.log(`[REDIS][pid:${process.pid}] Connected`);
 }
 
 export function isRedisAvailable() {
