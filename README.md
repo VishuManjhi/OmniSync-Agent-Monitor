@@ -32,10 +32,13 @@ Built for scale, the system manages the high-pressure intersection of agents and
 
 ### 📋 Total Ticket Lifecycle Control
 - **Intelligent Triage System (ITS)**: Weighted scoring algorithms that automatically route mission-critical issues (BOH/FOH) to the highest-skilled agents.
+- **Email-to-Ticket Service**: High-speed ingestion via Postmark webhooks with automated triage/categorization and Redis-based deduplication for zero-loss reliability.
+- **Automated SOP Acknowledgement**: Instant outbound email replies triggered by reference detection in inbound reports, ensuring immediate tactical confirmation.
 - **Workflow State Enforcement**: Strict server-side validation for ticket transitions: `ASSIGNED` → `IN_PROGRESS` → `RESOLUTION_REQUESTED` → `RESOLVED`.
 - **Real-Time Collab Rooms**: Dedicated Socket.io environments for rapid area manager collaboration and technical deep-dives.
 
 ### 💂 Supervisor Command Centre
+- **Team-wise Supervision**: Manage distinct agent pools (FOH, BOH, KIOSK Teams) based on specialized `assignmentSkills` and weighted workload scores.
 - **Live Operation Monitoring**: Real-time visibility into agent states (Active, On-Call, On-Break) with quick-action cards.
 - **SLA Breach Automation**: Automated listing and escalation of tickets nearing breach, ensuring compliance across multi-location groups.
 - **Reporting Centre**: Weekly/monthly performance analytics, Excel export generation, and automated SMTP email delivery.
