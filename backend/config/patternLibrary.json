@@ -1,0 +1,5 @@
+{
+  "FOH": ["front", "counter", "order", "customer", "floor", "dine", "billing"],
+  "BOH": ["kitchen", "inventory", "prep", "stock", "supply", "back", "chef"],
+  "KIOSK": ["kiosk", "terminal", "screen", "touch", "payment machine", "qr", "printer"]
+}

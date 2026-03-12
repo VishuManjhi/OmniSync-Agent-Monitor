@@ -92,6 +92,74 @@ io.on('connection', (socket) => {
         }
     });
 
+    socket.on('ticket:join-room', (data = {}) => {
+        const ticketId = String(data.ticketId || '').trim();
+        if (!ticketId) return;
+
+        const roomId = `ticket:${ticketId}`;
+        socket.join(roomId);
+        io.to(roomId).emit('ticket:presence', {
+            type: 'ticket:presence',
+            ticketId,
+            roomId,
+            agentId: socket.data.agentId || data.agentId || null,
+            role: socket.data.role || data.role || null,
+            action: 'joined',
+            at: Date.now()
+        });
+    });
+
+    socket.on('ticket:leave-room', (data = {}) => {
+        const ticketId = String(data.ticketId || '').trim();
+        if (!ticketId) return;
+
+        const roomId = `ticket:${ticketId}`;
+        socket.leave(roomId);
+        io.to(roomId).emit('ticket:presence', {
+            type: 'ticket:presence',
+            ticketId,
+            roomId,
+            agentId: socket.data.agentId || data.agentId || null,
+            role: socket.data.role || data.role || null,
+            action: 'left',
+            at: Date.now()
+        });
+    });
+
+    socket.on('ticket:room-message', async (data = {}) => {
+        const ticketId = String(data.ticketId || '').trim();
+        const content = String(data.content || '').trim();
+        if (!ticketId || !content) return;
+
+        const roomId = `ticket:${ticketId}`;
+        const payload = {
+            type: 'ticket:room-message',
+            id: data.id || crypto.randomUUID(),
+            ticketId,
+            roomId,
+            senderId: socket.data.agentId || data.senderId || 'unknown',
+            senderRole: socket.data.role || data.senderRole || null,
+            content,
+            timestamp: Date.now()
+        };
+
+        try {
+            const msg = new Message({
+                _id: payload.id,
+                senderId: payload.senderId,
+                receiverId: roomId,
+                content: payload.content,
+                type: 'CHAT',
+                timestamp: payload.timestamp
+            });
+            await msg.save();
+        } catch (err) {
+            console.error('[WS] ticket:room-message save failed', err);
+        }
+
+        io.to(roomId).emit('ticket:room-message', payload);
+    });
+
     socket.on('disconnect', () => {
         console.log('[WS] Connection closed:', socket.id);
     });

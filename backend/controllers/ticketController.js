@@ -3,8 +3,12 @@ import {
     createOrUpsertTicket,
     getAgentTicketsData,
     getAllTicketsData,
-    updateTicketData
+    updateTicketData,
+    getTicketCollaborators,
+    addTicketCollaborator,
+    removeTicketCollaborator
 } from '../services/ticketService.js';
+import { sendTicketReply, getTopHistoricalSolutions, applyHistoricalSolution } from '../services/emailReplyService.js';
 
 /**
  * Create or upsert a ticket
@@ -59,7 +63,11 @@ export const getAllTickets = async (req, res, next) => {
  */
 export const updateTicket = async (req, res, next) => {
     try {
-        const result = await updateTicketData(req.params.ticketId, req.body || {});
+        const result = await updateTicketData(req.params.ticketId, {
+            ...(req.body || {}),
+            _actorId: req.user?.agentId || req.user?.id || '',
+            _actorRole: req.user?.role || ''
+        });
         res.json(result);
     } catch (err) {
         if (err.statusCode && err.errorCode) {
@@ -68,6 +76,79 @@ export const updateTicket = async (req, res, next) => {
         if (err.statusCode === 404) {
             return res.status(404).json({ error: 'NOT_FOUND' });
         }
+        next(err);
+    }
+};
+
+export const listCollaborators = async (req, res, next) => {
+    try {
+        const payload = await getTicketCollaborators(req.params.ticketId);
+        res.json(payload);
+    } catch (err) {
+        next(err);
+    }
+};
+
+export const addCollaborator = async (req, res, next) => {
+    try {
+        const payload = await addTicketCollaborator({
+            ticketId: req.params.ticketId,
+            collaboratorAgentId: req.body.collaboratorAgentId,
+            actorId: req.user?.agentId || req.user?.id || 'SYSTEM'
+        });
+        res.json(payload);
+    } catch (err) {
+        next(err);
+    }
+};
+
+export const removeCollaborator = async (req, res, next) => {
+    try {
+        const payload = await removeTicketCollaborator({
+            ticketId: req.params.ticketId,
+            collaboratorAgentId: req.body.collaboratorAgentId,
+            actorId: req.user?.agentId || req.user?.id || 'SYSTEM'
+        });
+        res.json(payload);
+    } catch (err) {
+        next(err);
+    }
+};
+
+export const sendReply = async (req, res, next) => {
+    try {
+        const result = await sendTicketReply({
+            ticketId: req.params.ticketId,
+            templateKey: req.body.templateKey,
+            note: req.body.note
+        });
+        res.json(result);
+    } catch (err) {
+        next(err);
+    }
+};
+
+export const getTopSolutions = async (req, res, next) => {
+    try {
+        const result = await getTopHistoricalSolutions({
+            ticketId: req.params.ticketId,
+            limit: Number(req.query.limit || 3)
+        });
+        res.json(result);
+    } catch (err) {
+        next(err);
+    }
+};
+
+export const applyTopSolution = async (req, res, next) => {
+    try {
+        const result = await applyHistoricalSolution({
+            ticketId: req.params.ticketId,
+            solutionText: req.body.solution,
+            actorId: req.user?.id || req.user?.agentId || 'SYSTEM'
+        });
+        res.json(result);
+    } catch (err) {
         next(err);
     }
 };

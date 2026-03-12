@@ -19,11 +19,15 @@ import analyticsRoutes from '../routes/analyticsRoutes.js';
 import supervisorRoutes from '../routes/supervisorRoutes.js';
 import broadcastRoutes from '../routes/broadcastRoutes.js';
 import fileRoutes from '../routes/fileRoutes.js';
+import webhookRoutes from '../routes/webhookRoutes.js';
+import publicRoutes from '../routes/publicRoutes.js';
+
+const app = express();
 
 // Middleware Imports
 import errorHandler from '../middleware/errorHandler.js';
 
-const app = express();
+
 
 // ── ENVIRONMENT VALIDATION ──
 const JWT_SECRET = process.env.JWT_SECRET;
@@ -64,7 +68,12 @@ app.use(cors({
 
 // Prevent HTTP Parameter Pollution
 app.use(hpp());
-app.use(express.json({ limit: '5mb' })); // Reduced limit from 10mb for better protection
+app.use(express.json({
+  limit: '5mb',
+  verify: (req, res, buf) => {
+    req.rawBody = buf.toString('utf8');
+  }
+})); // Reduced limit from 10mb for better protection
 
 // Setup __dirname for ES modules
 const __filename = fileURLToPath(import.meta.url);
@@ -96,6 +105,8 @@ app.get('/health', (req, res) => {
 
 // ── PUBLIC ROUTES ──
 app.use('/api/auth', authRoutes);
+app.use('/api/webhooks', webhookRoutes);
+app.use('/api/public', publicRoutes);
 
 // ── PROTECTED ROUTES ──
 app.use('/api', authenticateToken);

@@ -26,6 +26,7 @@
     "nodemailer": "^7.0.5",
     "passport": "^0.7.0",
     "passport-jwt": "^4.0.1",
+    "postmark": "^4.0.5",
     "redis": "^5.11.0",
     "socket.io": "^4.8.3",
     "ws": "^8.19.0",

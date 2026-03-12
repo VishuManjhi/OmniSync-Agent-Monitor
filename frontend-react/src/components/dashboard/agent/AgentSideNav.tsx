@@ -10,6 +10,7 @@ import {
     LogOut
 } from 'lucide-react';
 import { styles } from './agentDashboardStyles';
+import { getStaffName } from '../../../utils/staffDirectory';
 
 interface AgentSideNavProps {
     activeView: string;
@@ -25,7 +26,7 @@ const AgentSideNav: React.FC<AgentSideNavProps> = ({ activeView, setActiveView, 
                 <div style={styles.logoBox}>
                     <Shield size={24} color="var(--accent-blue)" />
                 </div>
-                <span style={styles.navLogo}>OMNISYNC</span>
+                <span style={styles.navLogo}>restroboard</span>
             </div>
 
             <nav style={styles.navLinks}>
@@ -75,9 +76,9 @@ const AgentSideNav: React.FC<AgentSideNavProps> = ({ activeView, setActiveView, 
 
             <div style={styles.navFooter}>
                 <div style={styles.miniProfile}>
-                    <div style={styles.avatar}>{agent?.name?.[0]}</div>
+                    <div style={styles.avatar}>{getStaffName(agent?.agentId, agent?.name)?.[0]}</div>
                     <div style={styles.profileText}>
-                        <span style={styles.profileName}>{agent?.name}</span>
+                        <span style={styles.profileName}>{getStaffName(agent?.agentId, agent?.name)}</span>
                         <span style={styles.profileId}>{agent?.agentId}</span>
                     </div>
                 </div>

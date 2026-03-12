@@ -2,10 +2,26 @@ import React, { useEffect, useState } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { useWebSocket } from '../context/SocketContext';
 import { useQuery, useMutation, useQueryClient, keepPreviousData } from '@tanstack/react-query';
-import { fetchAgents, fetchSessions, fetchQueueStats, updateTicket, forceLogout, createTicket, fetchTickets, fetchAgentTickets, fetchAsyncJobs, fetchSlaBreaches, runSlaAutomation } from '../api/agent';
-import type { Agent, AgentSession, Ticket, AsyncJobItem } from '../api/types';
+import {
+    fetchAgents,
+    fetchSessions,
+    fetchQueueStats,
+    updateTicket,
+    forceLogout,
+    createTicket,
+    fetchTickets,
+    fetchAgentTickets,
+    fetchAsyncJobs,
+    fetchSlaBreaches,
+    runSlaAutomation,
+    fetchTicketCollaborators,
+    addTicketCollaborator,
+    removeTicketCollaborator
+} from '../api/agent';
+import type { Agent, AgentSession, Ticket, AsyncJobItem, TicketCollaborator } from '../api/types';
 import { Search, Plus, Phone, Activity, Clock, Users, Coffee, AlertTriangle, Eye } from 'lucide-react';
 import BroadcastBanner from './messaging/BroadcastBanner';
+import { getStaffName } from '../utils/staffDirectory';
 
 // Modular Components
 import { styles } from './dashboard/dashboardStyles';
@@ -28,7 +44,7 @@ import ReportCentre from './dashboard/supervisor/ReportCentre';
 
 const SupervisorDashboard: React.FC = () => {
     const { logout, user } = useAuth();
-    const { lastMessage, sendMessage } = useWebSocket();
+    const { lastMessage, sendMessage, sendEvent } = useWebSocket();
     const queryClient = useQueryClient();
     const { showNotification } = useNotification();
 
@@ -48,6 +64,11 @@ const SupervisorDashboard: React.FC = () => {
     const [reportAgentId, setReportAgentId] = useState<string | null>(null);
     const [jobsPage, setJobsPage] = useState(1);
     const [slaPage, setSlaPage] = useState(1);
+    const [collabTicket, setCollabTicket] = useState<Ticket | null>(null);
+    const [collabDraft, setCollabDraft] = useState('');
+    const [collabMessageDraft, setCollabMessageDraft] = useState('');
+    const [collabMembers, setCollabMembers] = useState<TicketCollaborator[]>([]);
+    const [collabMessages, setCollabMessages] = useState<Array<{ id: string; senderId: string; content: string; timestamp: number }>>([]);
 
     // Queries
     const { data: agents = [], isLoading: isLoadingAgents } = useQuery({
@@ -138,6 +159,19 @@ const SupervisorDashboard: React.FC = () => {
 
     const loading = isLoadingAgents || isLoadingSessions || isLoadingStats || isLoadingActivity;
 
+    const getAssistedByLabel = (ticket: Ticket) => {
+        const primaryId = String(ticket.collaboration?.primaryAgentId || ticket.agentId || '').toLowerCase();
+        const collaborators = (ticket.collaboration?.collaborators || [])
+            .filter((member) => member.active !== false)
+            .filter((member) => String(member.agentId || '').toLowerCase() !== primaryId)
+            .map((member) => {
+                const agentMeta = agents.find((item) => item.agentId === member.agentId);
+                return agentMeta?.name || member.agentId;
+            });
+
+        return collaborators.length > 0 ? collaborators.join(', ') : '';
+    };
+
     // Mutations
     const updateTicketMutation = useMutation({
         mutationFn: ({ ticketId, updates }: { ticketId: string, updates: Partial<Ticket> }) => updateTicket(ticketId, updates),
@@ -197,6 +231,32 @@ const SupervisorDashboard: React.FC = () => {
         }
     });
 
+    const addCollabMutation = useMutation({
+        mutationFn: ({ ticketId, collaboratorAgentId }: { ticketId: string; collaboratorAgentId: string }) =>
+            addTicketCollaborator(ticketId, collaboratorAgentId),
+        onSuccess: (result) => {
+            setCollabMembers(result.collaborators || []);
+            showNotification('Collaborator added.', 'success', 'ROOM UPDATED');
+        },
+        onError: (err: unknown) => {
+            const message = err instanceof Error ? err.message : 'Failed to add collaborator';
+            showNotification(message, 'error', 'SYSTEM ERROR');
+        }
+    });
+
+    const removeCollabMutation = useMutation({
+        mutationFn: ({ ticketId, collaboratorAgentId }: { ticketId: string; collaboratorAgentId: string }) =>
+            removeTicketCollaborator(ticketId, collaboratorAgentId),
+        onSuccess: (result) => {
+            setCollabMembers(result.collaborators || []);
+            showNotification('Collaborator removed.', 'success', 'ROOM UPDATED');
+        },
+        onError: (err: unknown) => {
+            const message = err instanceof Error ? err.message : 'Failed to remove collaborator';
+            showNotification(message, 'error', 'SYSTEM ERROR');
+        }
+    });
+
     // WebSocket Handling
     useEffect(() => {
         if (lastMessage) {
@@ -210,8 +270,19 @@ const SupervisorDashboard: React.FC = () => {
             if (data.type === 'AGENT_STATUS_CHANGE' || data.type === 'TICKET_CREATED') {
                 queryClient.invalidateQueries({ queryKey: ['queue-stats'] });
             }
+            if (data.type === 'ticket:room-message' && collabTicket && data.ticketId === collabTicket.ticketId) {
+                setCollabMessages((prev) => ([
+                    ...prev,
+                    {
+                        id: String(data.id || crypto.randomUUID()),
+                        senderId: String(data.senderId || 'unknown'),
+                        content: String(data.content || ''),
+                        timestamp: Number(data.timestamp || Date.now())
+                    }
+                ].slice(-100)));
+            }
         }
-    }, [lastMessage, queryClient]);
+    }, [lastMessage, queryClient, collabTicket]);
 
     useEffect(() => {
         const timer = window.setInterval(() => setNowTs(Date.now()), 60000);
@@ -262,6 +333,60 @@ const SupervisorDashboard: React.FC = () => {
 
     const handleForceLogout = (agentId: string) => {
         setConfirmLogoutAgent(agentId);
+    };
+
+    const handleOpenCollabRoom = async (ticket: Ticket) => {
+        try {
+            const result = await fetchTicketCollaborators(ticket.ticketId);
+            setCollabTicket(ticket);
+            setCollabMembers(result.collaborators || []);
+            setCollabMessages([]);
+            sendEvent('ticket:join-room', {
+                ticketId: ticket.ticketId,
+                agentId: user?.id,
+                role: user?.role
+            });
+        } catch (err) {
+            const message = err instanceof Error ? err.message : 'Failed to open ticket room';
+            showNotification(message, 'error', 'SYSTEM ERROR');
+        }
+    };
+
+    const handleCloseCollabRoom = () => {
+        if (collabTicket) {
+            sendEvent('ticket:leave-room', {
+                ticketId: collabTicket.ticketId,
+                agentId: user?.id,
+                role: user?.role
+            });
+        }
+        setCollabTicket(null);
+        setCollabDraft('');
+        setCollabMessageDraft('');
+        setCollabMembers([]);
+        setCollabMessages([]);
+    };
+
+    const handleSendCollabMessage = () => {
+        if (!collabTicket || !collabMessageDraft.trim()) return;
+        sendEvent('ticket:room-message', {
+            ticketId: collabTicket.ticketId,
+            content: collabMessageDraft.trim(),
+            senderId: user?.id,
+            senderRole: user?.role
+        });
+        setCollabMessageDraft('');
+    };
+
+    const handleAddCollab = () => {
+        if (!collabTicket || !collabDraft.trim()) return;
+        addCollabMutation.mutate({ ticketId: collabTicket.ticketId, collaboratorAgentId: collabDraft.trim().toLowerCase() });
+        setCollabDraft('');
+    };
+
+    const handleRemoveCollab = (agentId: string) => {
+        if (!collabTicket) return;
+        removeCollabMutation.mutate({ ticketId: collabTicket.ticketId, collaboratorAgentId: agentId });
     };
 
     const executeForceLogout = async () => {
@@ -493,12 +618,18 @@ const SupervisorDashboard: React.FC = () => {
 
                                         <div style={styles.ticketCardRow}>
                                             <span style={styles.ticketRowLabel}>Agent</span>
-                                            <span style={styles.ticketRowValue}>{ticket.agentId}</span>
+                                            <span style={styles.ticketRowValue}>{getStaffName(ticket.agentId, ticket.agentId)}</span>
                                         </div>
                                         <div style={styles.ticketCardRow}>
                                             <span style={styles.ticketRowLabel}>Issue</span>
                                             <span style={styles.ticketRowValue}>{ticket.issueType}</span>
                                         </div>
+                                        {getAssistedByLabel(ticket) && (
+                                            <div style={styles.ticketCardRow}>
+                                                <span style={styles.ticketRowLabel}>Assisted By</span>
+                                                <span style={styles.ticketRowValue}>{getAssistedByLabel(ticket)}</span>
+                                            </div>
+                                        )}
 
                                         <div style={{ ...styles.descriptionBox, background: 'var(--glass-highlight)', border: '1px solid var(--glass-border)' }}>
                                             {ticket.description}
@@ -678,7 +809,7 @@ const SupervisorDashboard: React.FC = () => {
                                     {(slaBreaches?.breaches || []).map(ticket => (
                                         <tr key={ticket.ticketId} style={styles.tr} onClick={() => setSelectedTicket(ticket)}>
                                             <td style={styles.td}>{ticket.displayId || ticket.ticketId}</td>
-                                            <td style={styles.td}>{ticket.agentId}</td>
+                                            <td style={styles.td}>{getStaffName(ticket.agentId, ticket.agentId)}</td>
                                             <td style={styles.td}>{ticket.issueType}</td>
                                             <td style={styles.td}>{ticket.status}</td>
                                             <td style={styles.td}>{new Date(ticket.issueDateTime).toLocaleString()}</td>
@@ -741,6 +872,7 @@ const SupervisorDashboard: React.FC = () => {
                                         <th style={styles.th}>Ticket ID</th>
                                         <th style={styles.th}>Agent</th>
                                         <th style={styles.th}>Case Type</th>
+                                        <th style={styles.th}>Assisted By</th>
                                         <th style={styles.th}>Description</th>
                                         <th style={styles.th}>Time</th>
                                         <th style={styles.th}>Status</th>
@@ -760,12 +892,10 @@ const SupervisorDashboard: React.FC = () => {
                                                         {isPriority && <div style={{ fontSize: '0.6rem', color: '#ef4444', fontWeight: '800' }}>PRIORITY</div>}
                                                     </td>
                                                     <td style={styles.td}>
-                                                        <div style={{ display: 'flex', flexDirection: 'column' }}>
-                                                            <span style={{ fontWeight: '700' }}>{agent?.name || 'Unknown'}</span>
-                                                            <span style={{ fontSize: '0.65rem', color: 'var(--text-muted)' }}>{ticket.agentId}</span>
-                                                        </div>
+                                                        {getStaffName(ticket.agentId, agent?.name || ticket.agentId)}
                                                     </td>
                                                     <td style={styles.td}>{ticket.issueType}</td>
+                                                    <td style={{ ...styles.td, fontSize: '0.72rem', color: 'var(--text-secondary)' }}>{getAssistedByLabel(ticket) || '-'}</td>
                                                     <td style={{ ...styles.td, maxWidth: '200px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                                                         {ticket.description}
                                                     </td>
@@ -782,6 +912,9 @@ const SupervisorDashboard: React.FC = () => {
                                                     <td style={styles.td}>
                                                         <button onClick={() => setSelectedTicket(ticket)} style={styles.iconBtn}>
                                                             <Eye size={16} />
+                                                        </button>
+                                                        <button onClick={() => handleOpenCollabRoom(ticket)} style={styles.iconBtn}>
+                                                            <Users size={16} />
                                                         </button>
                                                     </td>
                                                 </tr>
@@ -949,6 +1082,65 @@ const SupervisorDashboard: React.FC = () => {
                 onConfirm={executeForceLogout}
                 onCancel={() => setConfirmLogoutAgent(null)}
             />
+
+            {collabTicket && (
+                <div style={styles.modalOverlay}>
+                    <div className="glass-card" style={{ ...styles.modal, maxWidth: '760px' }}>
+                        <div style={styles.modalHeader}>
+                            <h3 style={styles.modalTitle}>Ticket Collaboration Room</h3>
+                            <button onClick={handleCloseCollabRoom} style={styles.iconBtn}>×</button>
+                        </div>
+
+                        <div style={styles.modalContent}>
+                            <div style={{ color: 'var(--text-muted)', fontWeight: 700 }}>
+                                {collabTicket.displayId || collabTicket.ticketId} • {collabTicket.issueType}
+                            </div>
+
+                            <div style={{ display: 'flex', gap: '8px' }}>
+                                <input
+                                    value={collabDraft}
+                                    onChange={(e) => setCollabDraft(e.target.value)}
+                                    placeholder="Add collaborator agent ID"
+                                    style={{ ...agentStyles.lightInput, flex: 1 }}
+                                />
+                                <button onClick={handleAddCollab} style={styles.createBtn} disabled={addCollabMutation.isPending || !collabDraft.trim()}>
+                                    Add
+                                </button>
+                            </div>
+
+                            <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                                {collabMembers.filter((m) => m.active !== false).map((member) => (
+                                    <span key={member.agentId} style={{ border: '1px solid var(--glass-border)', borderRadius: '999px', padding: '6px 10px', display: 'inline-flex', alignItems: 'center', gap: '8px' }}>
+                                        {member.agentId} ({member.role})
+                                        {member.role !== 'primary' && (
+                                            <button onClick={() => handleRemoveCollab(member.agentId)} style={styles.iconBtn} disabled={removeCollabMutation.isPending}>×</button>
+                                        )}
+                                    </span>
+                                ))}
+                            </div>
+
+                            <div style={{ border: '1px solid var(--glass-border)', borderRadius: '8px', padding: '10px', minHeight: '180px', maxHeight: '280px', overflowY: 'auto' }}>
+                                {collabMessages.length > 0 ? collabMessages.map((msg) => (
+                                    <div key={msg.id} style={{ marginBottom: '8px' }}>
+                                        <div style={{ fontSize: '0.72rem', color: 'var(--accent-yellow)', fontWeight: 700 }}>{msg.senderId} • {new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</div>
+                                        <div>{msg.content}</div>
+                                    </div>
+                                )) : <div style={{ color: 'var(--text-muted)' }}>No room messages yet.</div>}
+                            </div>
+
+                            <div style={{ display: 'flex', gap: '8px' }}>
+                                <input
+                                    value={collabMessageDraft}
+                                    onChange={(e) => setCollabMessageDraft(e.target.value)}
+                                    placeholder="Type room message"
+                                    style={{ ...agentStyles.lightInput, flex: 1 }}
+                                />
+                                <button onClick={handleSendCollabMessage} style={styles.createBtn} disabled={!collabMessageDraft.trim()}>Send</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
 
             <ThemeToggle />
         </div>

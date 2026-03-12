@@ -6,6 +6,7 @@ import SupervisorDashboard from './components/SupervisorDashboard';
 import AgentDashboard from './components/AgentDashboard';
 import ProtectedRoute from './components/ProtectedRoute';
 import NotificationContainer from './components/ui/Notification';
+import LandingHelp from './components/LandingHelp';
 
 // Helper component to handle initial landing and role-based redirect
 const HomeRedirect: React.FC = () => {
@@ -15,7 +16,7 @@ const HomeRedirect: React.FC = () => {
   useEffect(() => {
     const target = isAuthenticated
       ? (user?.role === 'supervisor' ? '/supervisor' : '/agent')
-      : '/login';
+      : '/';
 
     if (window.location.pathname !== target) {
       console.log(`[Router] Redirecting to ${target} (Auth: ${isAuthenticated})`);
@@ -32,6 +33,8 @@ const App: React.FC = () => {
       <div className="aurora-bg" />
       <NotificationContainer />
       <Routes>
+        <Route path="/" element={<LandingHelp />} />
+        <Route path="/help" element={<LandingHelp />} />
         <Route path="/login" element={<Login />} />
 
         <Route
@@ -52,7 +55,7 @@ const App: React.FC = () => {
           }
         />
 
-        <Route path="/" element={<HomeRedirect />} />
+        <Route path="/home" element={<HomeRedirect />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </BrowserRouter>

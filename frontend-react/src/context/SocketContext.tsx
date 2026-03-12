@@ -7,6 +7,7 @@ import { forceLogout } from '../api/agent';
 interface WebSocketContextType {
     lastMessage: any;
     sendMessage: (msg: any) => void;
+    sendEvent: (eventName: string, payload: any) => void;
     isConnected: boolean;
 }
 
@@ -76,6 +77,14 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({ chi
             setLastMessage(data);
         });
 
+        socket.on('ticket:presence', (data) => {
+            setLastMessage(data);
+        });
+
+        socket.on('ticket:room-message', (data) => {
+            setLastMessage(data);
+        });
+
         socket.on('disconnect', () => {
             console.log('[WS] Disconnected');
             setIsConnected(false);
@@ -94,8 +103,14 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         }
     };
 
+    const sendEvent = (eventName: string, payload: any) => {
+        if (socketRef.current?.connected && eventName) {
+            socketRef.current.emit(eventName, payload);
+        }
+    };
+
     return (
-        <WebSocketContext.Provider value={{ lastMessage, sendMessage, isConnected }}>
+        <WebSocketContext.Provider value={{ lastMessage, sendMessage, sendEvent, isConnected }}>
             {children}
         </WebSocketContext.Provider>
     );

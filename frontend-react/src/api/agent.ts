@@ -1,5 +1,17 @@
 import { apiFetch } from './base';
-import type { Agent, AgentSession, Ticket, QueueStats, PaginatedTickets, Message, AgentAnalytics, AgentReport, AsyncJobsResponse, SlaBreachResponse } from './types';
+import type {
+    Agent,
+    AgentSession,
+    Ticket,
+    QueueStats,
+    PaginatedTickets,
+    Message,
+    AgentAnalytics,
+    AgentReport,
+    AsyncJobsResponse,
+    SlaBreachResponse,
+    TicketCollaboratorsResponse
+} from './types';
 
 const API_BASE_URL = 'http://localhost:3003';
 const TOKEN_KEY = 'omnisync_jwt';
@@ -51,6 +63,30 @@ export const updateTicket = (ticketId: string, updates: Partial<Ticket>) =>
     apiFetch(`/api/tickets/${ticketId}`, {
         method: 'PATCH',
         body: JSON.stringify(updates)
+    });
+
+export const fetchTopSolutions = (ticketId: string) =>
+    apiFetch<{ ok: boolean; ticketId: string; issueType: string; solutions: Array<{ rank: number; text: string; usageCount: number; lastUsedAt?: number | null; source?: string }> }>(`/api/tickets/${ticketId}/top-solutions`);
+
+export const applyTopSolution = (ticketId: string, solution: string) =>
+    apiFetch<{ ok: boolean; messageId?: string; to?: string; ticketId: string }>(`/api/tickets/${ticketId}/apply-solution`, {
+        method: 'POST',
+        body: JSON.stringify({ solution })
+    });
+
+export const fetchTicketCollaborators = (ticketId: string) =>
+    apiFetch<TicketCollaboratorsResponse>(`/api/tickets/${ticketId}/collaborators`);
+
+export const addTicketCollaborator = (ticketId: string, collaboratorAgentId: string) =>
+    apiFetch<TicketCollaboratorsResponse>(`/api/tickets/${ticketId}/collaborators`, {
+        method: 'POST',
+        body: JSON.stringify({ collaboratorAgentId })
+    });
+
+export const removeTicketCollaborator = (ticketId: string, collaboratorAgentId: string) =>
+    apiFetch<TicketCollaboratorsResponse>(`/api/tickets/${ticketId}/collaborators`, {
+        method: 'DELETE',
+        body: JSON.stringify({ collaboratorAgentId })
     });
 
 export const createTicket = (ticket: Partial<Ticket>) =>

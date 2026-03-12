@@ -9,6 +9,23 @@ const attachmentSchema = new mongoose.Schema({
     path: { type: String },    // Disk storage path
 }, { _id: false });
 
+const emailReplySchema = new mongoose.Schema({
+    direction: { type: String, enum: ['inbound', 'outbound'], required: true },
+    templateKey: { type: String },
+    message: { type: String },
+    note: { type: String },
+    providerMessageId: { type: String },
+    at: { type: Number, default: () => Date.now() }
+}, { _id: false });
+
+const ticketCollaboratorSchema = new mongoose.Schema({
+    agentId: { type: String, required: true },
+    role: { type: String, enum: ['primary', 'secondary'], default: 'secondary' },
+    joinedAt: { type: Number, default: () => Date.now() },
+    invitedBy: { type: String },
+    active: { type: Boolean, default: true }
+}, { _id: false });
+
 const ticketSchema = new mongoose.Schema({
     ticketId: { type: String, required: true },
     displayId: { type: String },
@@ -17,7 +34,7 @@ const ticketSchema = new mongoose.Schema({
     description: { type: String },
     status: {
         type: String,
-        enum: ['OPEN', 'ASSIGNED', 'IN_PROGRESS', 'RESOLUTION_REQUESTED', 'RESOLVED', 'REJECTED'],
+        enum: ['OPEN', 'ASSIGNED', 'IN_PROGRESS', 'PENDING_CUSTOMER', 'RESOLUTION_REQUESTED', 'RESOLVED', 'REJECTED'],
         default: 'OPEN'
     },
     issueDateTime: { type: Number, required: true },
@@ -33,6 +50,38 @@ const ticketSchema = new mongoose.Schema({
         status: { type: String },
         notes: { type: String },
         timestamp: { type: Number }
+    },
+    collaboration: {
+        roomId: { type: String },
+        primaryAgentId: { type: String },
+        collaborators: { type: [ticketCollaboratorSchema], default: [] },
+        lastActivityAt: { type: Number }
+    },
+    emailMeta: {
+        source: { type: String, enum: ['manual', 'inbound_email'], default: 'manual' },
+        customerEmail: { type: String },
+        customerName: { type: String },
+        subject: { type: String },
+        providerMessageId: { type: String },
+        dedupeKey: { type: String },
+        triageLabel: { type: String, enum: ['FOH', 'BOH', 'KIOSK', 'other'] },
+        triageBreakdown: {
+            scores: {
+                FOH: { type: Number, default: 0 },
+                BOH: { type: Number, default: 0 },
+                KIOSK: { type: Number, default: 0 }
+            },
+            ranked: { type: [new mongoose.Schema({ label: String, score: Number }, { _id: false })], default: [] },
+            matchedTerms: {
+                FOH: { type: [new mongoose.Schema({ term: String, weight: Number }, { _id: false })], default: [] },
+                BOH: { type: [new mongoose.Schema({ term: String, weight: Number }, { _id: false })], default: [] },
+                KIOSK: { type: [new mongoose.Schema({ term: String, weight: Number }, { _id: false })], default: [] }
+            }
+        },
+        sopMatched: { type: Boolean, default: false },
+        inboundAt: { type: Number },
+        lastOutboundAt: { type: Number },
+        replies: { type: [emailReplySchema], default: [] }
     }
 }, { timestamps: true });
 

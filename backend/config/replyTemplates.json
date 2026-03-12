@@ -1,0 +1,10 @@
+{
+  "SOP_ERR_ACK": {
+    "subject": "We received your issue report",
+    "body": "Hi {{name}},\n\nWe detected your reference {{reference}} and started system handling. Our team will keep you updated on this ticket.\n\nRegards,\nSupport Team"
+  },
+  "CUSTOMER_UPDATE": {
+    "subject": "Update on your support ticket {{displayId}}",
+    "body": "Hi {{name}},\n\n{{note}}\n\nIf you have more details, please reply to this email.\n\nRegards,\nSupport Team"
+  }
+}

@@ -9,9 +9,9 @@ async function seed() {
         await agentsCol.deleteMany({}); // Clear existing
 
         const agents = [
-            { agentId: 'a1', name: 'Vishu' },
-            { agentId: 'a2', name: 'JRashi' },
-            { agentId: 'a3', name: 'Aryan' },
+            { agentId: 'a1', name: 'Rohan' },
+            { agentId: 'a2', name: 'Priya' },
+            { agentId: 'a3', name: 'Neha' },
             { agentId: 'a4', name: 'Sameer' }
         ];
 
@@ -23,8 +23,8 @@ async function seed() {
         await supervisorsCol.deleteMany({}); // Clear existing
 
         const supervisors = [
-            { id: 'admin', name: 'Supervisor', role: 'supervisor' },
-            { id: 'sup1', name: 'Ops Lead', role: 'supervisor' }
+            { id: 'admin', name: 'Aryan', role: 'supervisor' },
+            { id: 'sup1', name: 'Vishu', role: 'supervisor' }
         ];
 
         await supervisorsCol.insertMany(supervisors);

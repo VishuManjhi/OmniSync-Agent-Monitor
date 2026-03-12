@@ -36,7 +36,7 @@ export const ticketSchema = z.object({
     agentId: z.string().min(1),
     issueType: z.enum(['FOH', 'BOH', 'KIOSK', 'other']),
     description: z.string().min(5).max(1000),
-    status: z.enum(['OPEN', 'IN_PROGRESS', 'ASSIGNED', 'RESOLUTION_REQUESTED', 'RESOLVED', 'REJECTED']).default('OPEN'),
+    status: z.enum(['OPEN', 'IN_PROGRESS', 'ASSIGNED', 'PENDING_CUSTOMER', 'RESOLUTION_REQUESTED', 'RESOLVED', 'REJECTED']).default('OPEN'),
     issueDateTime: z.number().default(() => Date.now()),
     callDuration: z.number().int().positive().optional(),
     assignedBy: z.enum(['SUPERVISOR', 'SYSTEM']).optional(),
@@ -61,12 +61,29 @@ export const ticketSchema = z.object({
 });
 
 export const ticketUpdateSchema = z.object({
-    status: z.enum(['OPEN', 'IN_PROGRESS', 'ASSIGNED', 'RESOLUTION_REQUESTED', 'RESOLVED', 'REJECTED']).optional(),
+    status: z.enum(['OPEN', 'IN_PROGRESS', 'ASSIGNED', 'PENDING_CUSTOMER', 'RESOLUTION_REQUESTED', 'RESOLVED', 'REJECTED']).optional(),
     description: z.string().min(5).max(1000).optional(),
     resolution: z.string().optional(),
     rejectionReason: z.string().optional()
 }).refine(data => Object.keys(data).length > 0, {
     message: "At least one field must be provided for update"
+});
+
+export const ticketReplySchema = z.object({
+    templateKey: z.string().min(1),
+    note: z.string().max(1000).optional()
+});
+
+export const topSolutionApplySchema = z.object({
+    solution: z.string().min(12).max(2000)
+});
+
+export const ticketCollaboratorAddSchema = z.object({
+    collaboratorAgentId: z.string().min(1)
+});
+
+export const ticketCollaboratorRemoveSchema = z.object({
+    collaboratorAgentId: z.string().min(1)
 });
 
 export const sessionEventSchema = z.object({
@@ -86,4 +103,11 @@ export const sessionEventSchema = z.object({
 export const authSchema = z.object({
     id: z.string().min(2),
     password: z.string().min(4)
+});
+
+export const publicFeedbackSchema = z.object({
+    name: z.string().min(2).max(120),
+    email: z.string().email(),
+    category: z.enum(['general', 'feature', 'bug', 'support']).default('general'),
+    message: z.string().min(10).max(2000)
 });

@@ -7,7 +7,19 @@ const agentSchema = new mongoose.Schema({
     email: { type: String },
     role: { type: String, enum: ['agent', 'supervisor'], default: 'agent' },
     password: { type: String }, // Hashed password
-    forceLoggedOut: { type: Boolean, default: false }
+    forceLoggedOut: { type: Boolean, default: false },
+    assignmentEnabled: { type: Boolean, default: true },
+    assignmentWeight: { type: Number, default: 1, min: 0 },
+    assignmentSkills: {
+        type: [String],
+        default: ['FOH', 'BOH', 'KIOSK'],
+        validate: {
+            validator: (skills) => (skills || []).every((item) => ['FOH', 'BOH', 'KIOSK', 'other'].includes(item)),
+            message: 'Invalid assignment skill'
+        }
+    },
+    activeOpenTickets: { type: Number, default: 0, min: 0 },
+    lastAssignedAt: { type: Number }
 }, { timestamps: true });
 
 // ── INDEXES FOR PRODUCTION PERFORMANCE ──

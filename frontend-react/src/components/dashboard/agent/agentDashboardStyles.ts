@@ -652,6 +652,46 @@ export const styles: Record<string, React.CSSProperties> = {
         fontSize: '0.75rem',
         cursor: 'pointer',
     },
+    solutionModalOverlay: {
+        position: 'fixed',
+        inset: 0,
+        background: 'rgba(15, 23, 42, 0.72)',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        zIndex: 1000,
+        padding: '24px'
+    },
+    solutionModalCard: {
+        width: 'min(760px, 100%)',
+        maxHeight: '85vh',
+        overflowY: 'auto',
+        background: 'var(--bg-card)',
+        border: '1px solid var(--accent-yellow)',
+        borderRadius: '18px',
+        padding: '24px',
+        boxShadow: '0 20px 60px rgba(0,0,0,0.35)'
+    },
+    solutionCard: {
+        border: '1px solid rgba(250, 204, 21, 0.35)',
+        background: 'var(--glass-highlight)',
+        borderRadius: '12px',
+        padding: '16px',
+        display: 'grid',
+        gap: '12px'
+    },
+    solutionSourceBadge: {
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: '6px',
+        padding: '4px 10px',
+        borderRadius: '999px',
+        border: '1px solid',
+        fontSize: '0.72rem',
+        fontWeight: 800,
+        textTransform: 'uppercase',
+        letterSpacing: '0.04em'
+    },
     status_ASSIGNED: { background: 'var(--glass-highlight)', color: 'var(--accent-error)' },
     status_IN_PROGRESS: { background: 'var(--glass-highlight)', color: 'var(--accent-blue)' },
     status_RESOLUTION_REQUESTED: { background: 'var(--glass-highlight)', color: 'var(--accent-yellow)' },

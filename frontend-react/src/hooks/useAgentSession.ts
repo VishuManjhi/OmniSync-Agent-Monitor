@@ -80,6 +80,10 @@ export const useAgentSession = (userId: string | undefined, session: AgentSessio
             showNotification('You are already offline.', 'info', 'Session Status');
             return;
         }
+        if (status === 'ON_CALL') {
+            showNotification('End the call before clocking out.', 'warning', 'Protocol Guard');
+            return;
+        }
         if (status === 'ON_BREAK') {
             showNotification('Please end your break before clocking out.', 'warning', 'Protocol Guard');
             return;
@@ -94,6 +98,10 @@ export const useAgentSession = (userId: string | undefined, session: AgentSessio
         const status = deriveStatus(session || null);
         if (status === 'OFFLINE') {
             showNotification('You must clock in before managing breaks.', 'warning', 'Protocol Intercept');
+            return;
+        }
+        if (status === 'ON_CALL') {
+            showNotification('End the call before starting a break.', 'warning', 'Protocol Guard');
             return;
         }
         if (!session) return;

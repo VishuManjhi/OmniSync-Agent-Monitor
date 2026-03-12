@@ -41,7 +41,7 @@ export interface Ticket {
     agentId: string;
     issueType: string;
     description: string;
-    status: 'OPEN' | 'IN_PROGRESS' | 'ASSIGNED' | 'RESOLUTION_REQUESTED' | 'RESOLVED' | 'REJECTED';
+    status: 'OPEN' | 'IN_PROGRESS' | 'ASSIGNED' | 'PENDING_CUSTOMER' | 'RESOLUTION_REQUESTED' | 'RESOLVED' | 'REJECTED';
     issueDateTime: number;
     resolvedAt: number | null;
     callDuration?: number | null;
@@ -53,8 +53,37 @@ export interface Ticket {
     resolutionRequestedAt?: number | null;
     rejectionReason?: string | null;
     rejectedAt?: number | null;
+    emailMeta?: {
+        source?: 'manual' | 'inbound_email';
+        customerEmail?: string;
+        customerName?: string;
+        subject?: string;
+        triageLabel?: 'FOH' | 'BOH' | 'KIOSK' | 'other';
+    };
+    collaboration?: {
+        roomId?: string;
+        primaryAgentId?: string;
+        collaborators?: TicketCollaborator[];
+        lastActivityAt?: number;
+    };
     updatedAt?: string;
     createdAt?: string;
+}
+
+export interface TicketCollaborator {
+    agentId: string;
+    role: 'primary' | 'secondary';
+    joinedAt?: number;
+    invitedBy?: string;
+    active?: boolean;
+}
+
+export interface TicketCollaboratorsResponse {
+    ok: boolean;
+    ticketId: string;
+    roomId: string;
+    primaryAgentId: string;
+    collaborators: TicketCollaborator[];
 }
 
 export interface QueueStats {

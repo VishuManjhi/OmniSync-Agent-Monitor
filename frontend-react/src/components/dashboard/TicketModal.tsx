@@ -23,6 +23,12 @@ export const TicketModal: React.FC<{
         onReject(rejectionReason);
     };
 
+    const assistedBy = (ticket.collaboration?.collaborators || [])
+        .filter((member) => member.active !== false)
+        .filter((member) => String(member.agentId || '').toLowerCase() !== String(ticket.collaboration?.primaryAgentId || ticket.agentId || '').toLowerCase())
+        .map((member) => member.agentId)
+        .join(', ');
+
     const footer = (
         <div style={{ display: 'flex', gap: '12px', width: '100%', justifyContent: 'flex-end', paddingTop: '1rem', borderTop: '1px solid var(--glass-border)' }}>
             {!isRejecting ? (
@@ -81,6 +87,12 @@ export const TicketModal: React.FC<{
                             <span style={styles.detailLabel}>AGENT</span>
                             <span style={styles.detailValue}>{ticket.agentId}</span>
                         </div>
+                        {assistedBy && (
+                            <div style={styles.detailItem}>
+                                <span style={styles.detailLabel}>ASSISTED BY</span>
+                                <span style={styles.detailValue}>{assistedBy}</span>
+                            </div>
+                        )}
                         <div style={styles.detailItem}>
                             <span style={styles.detailLabel}>STATUS</span>
                             <span style={{ ...styles.statusBadge, width: 'fit-content', fontSize: '0.8rem' }}>{ticket.status}</span>

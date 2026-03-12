@@ -27,7 +27,7 @@ const SupervisorSideNav: React.FC<SupervisorSideNavProps> = ({ activeView, setAc
                 <div style={styles.logoBox}>
                     <Shield size={24} color="var(--accent-yellow)" />
                 </div>
-                <span style={styles.navLogo}>RESTROBOARD</span>
+                <span style={styles.navLogo}>restroboard</span>
             </div>
 
             <nav style={styles.navLinks}>

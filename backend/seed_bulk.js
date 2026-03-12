@@ -30,8 +30,8 @@ function createAgentDoc(index) {
 
 function createSupervisorDocs() {
     return [
-        { agentId: 'admin', name: 'Supervisor Admin', email: 'admin@vba.local', role: 'supervisor', password: 'sup123' },
-        { agentId: 'sup1', name: 'Ops Lead', email: 'sup1@vba.local', role: 'supervisor', password: 'sup123' }
+        { agentId: 'admin', name: 'Aryan', email: 'admin@vba.local', role: 'supervisor', password: 'sup123' },
+        { agentId: 'sup1', name: 'Vishu', email: 'sup1@vba.local', role: 'supervisor', password: 'sup123' }
     ];
 }
 

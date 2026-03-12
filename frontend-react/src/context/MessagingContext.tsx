@@ -5,6 +5,8 @@ import { useNotification } from './NotificationContext';
 import { fetchBroadcasts } from '../api/agent';
 import type { Message } from '../api/types';
 
+const ROOM_INVITE_PREFIX = 'ROOM_INVITE::';
+
 interface MessagingContextType {
     messages: Message[];
     broadcasts: Message[];
@@ -73,19 +75,27 @@ export const MessagingProvider: React.FC<{ children: React.ReactNode }> = ({ chi
             });
 
         } else if (lastMessage.type === 'HELP_REQUEST' || lastMessage.type === 'CHAT_MESSAGE') {
+            const isRoomInvite = typeof lastMessage.content === 'string' && lastMessage.content.startsWith(ROOM_INVITE_PREFIX);
+
             // Notify supervisor or agent if it's an incoming message
             if (!isFromMe) {
-                const isHelp = lastMessage.type === 'HELP_REQUEST';
-                const title = user?.role === 'supervisor'
-                    ? (isHelp ? `Support SOS: ${lastMessage.senderId}` : `Message from ${lastMessage.senderId}`)
-                    : `Message from Supervisor`;
+                if (isRoomInvite) {
+                    showNotification('You have a new collaboration invite.', 'info', `Room invite from ${lastMessage.senderId}`);
+                } else {
+                    const isHelp = lastMessage.type === 'HELP_REQUEST';
+                    const title = user?.role === 'supervisor'
+                        ? (isHelp ? `Support SOS: ${lastMessage.senderId}` : `Message from ${lastMessage.senderId}`)
+                        : `Message from Supervisor`;
 
-                showNotification(
-                    lastMessage.content.length > 40 ? lastMessage.content.substring(0, 40) + '...' : lastMessage.content,
-                    isHelp ? 'error' : 'info',
-                    title
-                );
+                    showNotification(
+                        lastMessage.content.length > 40 ? lastMessage.content.substring(0, 40) + '...' : lastMessage.content,
+                        isHelp ? 'error' : 'info',
+                        title
+                    );
+                }
             }
+
+            if (isRoomInvite) return;
 
             setMessages(prev => {
                 // Deduplicate if we already added it optimistically

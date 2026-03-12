@@ -1,6 +1,7 @@
 import React from 'react';
 import { LogOut } from 'lucide-react';
 import { styles } from './agentDashboardStyles';
+import { getStaffName, getSupervisorInfo } from '../../../utils/staffDirectory';
 
 interface AgentProfileProps {
     agent: any;
@@ -8,14 +9,17 @@ interface AgentProfileProps {
 }
 
 const AgentProfile: React.FC<AgentProfileProps> = ({ agent, logout }) => {
+    const displayName = getStaffName(agent?.agentId, agent?.name);
+    const supervisor = getSupervisorInfo(agent?.agentId);
+
     return (
         <div className="fade-in">
             <section className="glass-card" style={styles.profileCard}>
                 <div style={styles.profileCover} />
                 <div style={styles.profileMeta}>
-                    <div style={styles.largeAvatar}>{agent?.name?.[0]}</div>
+                    <div style={styles.largeAvatar}>{displayName?.[0]}</div>
                     <div style={styles.profileMainInfo}>
-                        <h2 style={styles.profileDisplayName}>{agent?.name}</h2>
+                        <h2 style={styles.profileDisplayName}>{displayName}</h2>
                         <span style={styles.profileTitleBadge}>Certified OmniSync Agent</span>
                     </div>
                 </div>
@@ -28,6 +32,10 @@ const AgentProfile: React.FC<AgentProfileProps> = ({ agent, logout }) => {
                     <div style={styles.detailItem}>
                         <span style={styles.detailLabel}>Access Level</span>
                         <span style={styles.detailValue}>Standard Terminal Access</span>
+                    </div>
+                    <div style={styles.detailItem}>
+                        <span style={styles.detailLabel}>Supervisor</span>
+                        <span style={styles.detailValue}>{supervisor ? `${supervisor.id} • ${supervisor.name}` : 'Not assigned'}</span>
                     </div>
                     <div style={styles.detailItem}>
                         <span style={styles.detailLabel}>Performance Tier</span>
