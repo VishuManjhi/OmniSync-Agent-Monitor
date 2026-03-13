@@ -5,12 +5,14 @@ import mongoose from 'mongoose';
 import Ticket from '../models/Ticket.js';
 import { postmarkSend, postmarkSendWithTemplate } from './postmarkService.js';
 import { setTicketPendingCustomer } from './ticketService.js';
+import { searchOramaSolutions } from './oramaIndexService.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const templatesPath = path.join(__dirname, '..', 'config', 'replyTemplates.json');
 
 let templates = {};
+const USE_ORAMA_TOP3 = String(process.env.USE_ORAMA_TOP3 || 'true').toLowerCase() !== 'false';
 
 try {
     templates = JSON.parse(fs.readFileSync(templatesPath, 'utf8'));
@@ -189,8 +191,12 @@ function padSolutions(baseSolutions = [], issueType = 'other', limit = 3) {
 }
 
 async function aggregateHistoricalCandidates(match, maxRows = 400) {
+    const candidateKeys = Array.isArray(match.__candidateKeys) ? match.__candidateKeys : [];
+    const safeMatch = { ...match };
+    delete safeMatch.__candidateKeys;
+
     const pipeline = [
-        { $match: match },
+        { $match: safeMatch },
         {
             $project: {
                 lastUsedAt: { $ifNull: ['$resolvedAt', '$updatedAt'] },
@@ -241,6 +247,7 @@ async function aggregateHistoricalCandidates(match, maxRows = 400) {
         {
             $project: {
                 candidate: { $trim: { input: '$candidates' } },
+                candidateKey: { $toLower: { $trim: { input: '$candidates' } } },
                 lastUsedAt: 1
             }
         },
@@ -249,9 +256,10 @@ async function aggregateHistoricalCandidates(match, maxRows = 400) {
                 candidate: { $exists: true, $ne: '' }
             }
         },
+        ...(candidateKeys.length > 0 ? [{ $match: { candidateKey: { $in: candidateKeys } } }] : []),
         {
             $group: {
-                _id: { $toLower: '$candidate' },
+                _id: '$candidateKey',
                 text: { $first: '$candidate' },
                 usageCount: { $sum: 1 },
                 lastUsedAt: { $max: '$lastUsedAt' }
@@ -282,7 +290,37 @@ export async function getTopHistoricalSolutions({ ticketId, limit = 3 }) {
         ticketId: { $ne: current.ticketId }
     };
 
-    let aggregateRows = await aggregateHistoricalCandidates(scopedMatch);
+    const queryText = [
+        current.issueType || '',
+        current.description || '',
+        current?.emailMeta?.subject || ''
+    ].filter(Boolean).join(' ').trim();
+
+    let oramaCandidates = [];
+    if (USE_ORAMA_TOP3 && queryText) {
+        try {
+            oramaCandidates = await searchOramaSolutions({
+                queryText,
+                issueType: current.issueType,
+                limit: 120
+            });
+        } catch (err) {
+            console.warn('[EMAIL_REPLY] Orama search failed, falling back to mongo-only ranking', err.message);
+            oramaCandidates = [];
+        }
+    }
+
+    const candidateKeys = oramaCandidates.map((item) => item.key).filter(Boolean);
+    const oramaScoreByKey = new Map(oramaCandidates.map((item) => [item.key, Number(item.score || 0)]));
+
+    let aggregateRows = await aggregateHistoricalCandidates({
+        ...scopedMatch,
+        ...(candidateKeys.length > 0 ? { __candidateKeys: candidateKeys } : {})
+    });
+
+    if (!aggregateRows.length && candidateKeys.length > 0) {
+        aggregateRows = await aggregateHistoricalCandidates(scopedMatch);
+    }
 
     if (!aggregateRows.length) {
         aggregateRows = await aggregateHistoricalCandidates({
@@ -301,22 +339,43 @@ export async function getTopHistoricalSolutions({ ticketId, limit = 3 }) {
         const existing = bucket.get(key);
         const usageCount = Number(row?.usageCount || 0);
         const lastUsed = Number(row?.lastUsedAt || 0);
+        const oramaScore = Number(oramaScoreByKey.get(key) || 0);
 
         if (existing) {
             existing.count += usageCount;
             existing.lastUsed = Math.max(existing.lastUsed, lastUsed);
+            existing.oramaScore = Math.max(existing.oramaScore, oramaScore);
         } else {
             bucket.set(key, {
                 text: cleaned,
                 count: usageCount,
                 lastUsed,
+                oramaScore,
                 source: 'historical'
             });
         }
     }
 
-    const solutions = padSolutions(Array.from(bucket.values())
+    const rankedRows = Array.from(bucket.values());
+    const maxCount = rankedRows.reduce((max, row) => Math.max(max, row.count || 0), 1);
+    const maxLastUsed = rankedRows.reduce((max, row) => Math.max(max, row.lastUsed || 0), 1);
+    const maxOrama = rankedRows.reduce((max, row) => Math.max(max, row.oramaScore || 0), 1);
+
+    for (const row of rankedRows) {
+        const usageNorm = maxCount > 0 ? row.count / maxCount : 0;
+        const recencyNorm = maxLastUsed > 0 ? row.lastUsed / maxLastUsed : 0;
+        const oramaNorm = maxOrama > 0 ? row.oramaScore / maxOrama : 0;
+        row.finalScore = (oramaNorm * 0.6) + (usageNorm * 0.3) + (recencyNorm * 0.1);
+        if (oramaNorm > 0) {
+            row.source = 'orama';
+        }
+    }
+
+    const solutions = padSolutions(rankedRows
         .sort((a, b) => {
+            if ((b.finalScore || 0) !== (a.finalScore || 0)) {
+                return (b.finalScore || 0) - (a.finalScore || 0);
+            }
             if (b.count !== a.count) return b.count - a.count;
             return b.lastUsed - a.lastUsed;
         })

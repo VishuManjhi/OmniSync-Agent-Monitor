@@ -9,6 +9,7 @@ import hpp from 'hpp';
 import { connectDb } from '../db.js';
 import passportConfig from '../passport.js';
 import { initRedis } from '../services/redisClient.js';
+import { initOramaIndex } from '../services/oramaIndexService.js';
 
 // Route Imports
 import authRoutes from '../routes/authRoutes.js';
@@ -96,6 +97,16 @@ await initRedis().catch(err => {
 
 connectDb().catch(err => {
   console.error('[API] Failed to connect to DB:', err);
+});
+
+initOramaIndex().then((result) => {
+  if (result?.indexed !== null && result?.indexed !== undefined) {
+    console.log(`[API] Orama index initialized (${result.indexed} docs)`);
+  } else {
+    console.log('[API] Orama index ready');
+  }
+}).catch((err) => {
+  console.warn('[API] Orama init failed (continuing with mongo-only top3):', err.message);
 });
 
 // ── HEALTH CHECK ──

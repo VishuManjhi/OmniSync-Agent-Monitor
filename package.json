@@ -6,10 +6,13 @@
     "start": "node backend/start-all.js",
     "dev": "npm run clear-ports && node backend/start-all.js",
     "seed:bulk": "node backend/seed_bulk.js",
+    "index:text": "node backend/ensure_text_indexes.js",
+    "index:orama": "node backend/rebuild_orama_corpus.js",
     "worker:sqs": "node backend/workers/sqsWorker.js",
     "clear-ports": "powershell \"@(3003,8080) | % { $conn = Get-NetTCPConnection -LocalPort $_ -ErrorAction SilentlyContinue; if ($conn) { $pids = @($conn | Select-Object -ExpandProperty OwningProcess -Unique) | Where-Object { $_ -gt 4 }; foreach ($targetPid in $pids) { Stop-Process -Id $targetPid -Force -ErrorAction SilentlyContinue } } }\""
   },
   "dependencies": {
+    "@orama/orama": "^3.1.16",
     "@aws-sdk/client-sqs": "^3.893.0",
     "bcryptjs": "^3.0.3",
     "cors": "^2.8.5",

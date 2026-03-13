@@ -91,6 +91,24 @@ ticketSchema.index({ status: 1 });
 ticketSchema.index({ ticketId: 1 }, { unique: true });
 ticketSchema.index({ displayId: 1 }, { unique: true });
 ticketSchema.index({ createdBy: 1 });
+ticketSchema.index({
+    ticketId: 'text',
+    displayId: 'text',
+    issueType: 'text',
+    'emailMeta.subject': 'text',
+    'resolution.notes': 'text',
+    description: 'text'
+}, {
+    name: 'ticket_text_search_v1',
+    weights: {
+        ticketId: 15,
+        displayId: 12,
+        issueType: 5,
+        'emailMeta.subject': 6,
+        'resolution.notes': 2,
+        description: 3
+    }
+});
 
 const Ticket = mongoose.model('Ticket', ticketSchema);
 export default Ticket;

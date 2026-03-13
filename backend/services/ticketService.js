@@ -5,6 +5,156 @@ import Agent from '../models/Agent.js';
 import { saveFileFromBase64 } from './fileStorage.js';
 import { invalidatePattern } from './cacheService.js';
 
+const USE_TEXT_SEARCH = String(process.env.USE_TEXT_SEARCH || 'true').toLowerCase() !== 'false';
+
+function escapeRegex(value = '') {
+    return String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function buildAgentStatusQuery(status = 'ALL') {
+    const query = {};
+    if (status === 'ARCHIVE') {
+        query.status = { $in: ['RESOLVED', 'REJECTED', 'PENDING_CUSTOMER'] };
+    } else if (status === 'ACTIVE') {
+        query.status = { $nin: ['RESOLVED', 'REJECTED'] };
+    } else if (status && status !== 'ALL' && status !== 'RAISED') {
+        query.status = status;
+    }
+    return query;
+}
+
+function buildAllTicketsStatusQuery(status = 'ALL') {
+    const query = {};
+    if (status === 'ACTIVE') {
+        query.status = { $nin: ['RESOLVED', 'REJECTED'] };
+    } else if (status === 'RESOLVED') {
+        query.status = { $in: ['RESOLVED', 'REJECTED'] };
+    } else if (status === 'PRIORITY') {
+        const oneDayAgo = Date.now() - 86400000;
+        query.status = { $nin: ['RESOLVED', 'REJECTED'] };
+        query.issueDateTime = { $lt: oneDayAgo };
+    }
+    return query;
+}
+
+async function runRegexAgentSearch({ baseQuery, searchTerm, skip, limit }) {
+    const query = { ...baseQuery };
+    const searchRegex = new RegExp(escapeRegex(searchTerm), 'i');
+    query.$or = [
+        { ticketId: searchRegex },
+        { displayId: searchRegex },
+        { description: searchRegex }
+    ];
+
+    const [total, tickets] = await Promise.all([
+        Ticket.countDocuments(query),
+        Ticket.find(query).sort({ issueDateTime: -1 }).skip(skip).limit(limit)
+    ]);
+
+    return { total, tickets };
+}
+
+async function runTextAgentSearch({ baseQuery, searchTerm, lowerSearch, skip, limit }) {
+    const match = {
+        ...baseQuery,
+        $text: { $search: searchTerm }
+    };
+
+    const [total, tickets] = await Promise.all([
+        Ticket.countDocuments(match),
+        Ticket.aggregate([
+            { $match: match },
+            {
+                $addFields: {
+                    _textScore: { $meta: 'textScore' },
+                    _exactTicket: {
+                        $cond: [{ $eq: [{ $toLower: '$ticketId' }, lowerSearch] }, 1, 0]
+                    },
+                    _exactDisplay: {
+                        $cond: [{ $eq: [{ $toLower: '$displayId' }, lowerSearch] }, 1, 0]
+                    }
+                }
+            },
+            { $sort: { _exactTicket: -1, _exactDisplay: -1, _textScore: -1, issueDateTime: -1 } },
+            { $skip: skip },
+            { $limit: limit },
+            { $project: { _textScore: 0, _exactTicket: 0, _exactDisplay: 0 } }
+        ])
+    ]);
+
+    return { total, tickets };
+}
+
+async function runRegexAllTicketsSearch({ statusQuery, searchTerm, skip, limit }) {
+    const query = { ...statusQuery };
+    const searchRegex = new RegExp(escapeRegex(searchTerm), 'i');
+
+    const matchingAgents = await Agent.find({
+        $or: [{ agentId: searchRegex }, { name: searchRegex }]
+    }).select('agentId');
+    const matchingAgentIds = matchingAgents.map((agent) => agent.agentId);
+
+    query.$or = [
+        { ticketId: searchRegex },
+        { displayId: searchRegex },
+        { description: searchRegex },
+        { agentId: { $in: matchingAgentIds } }
+    ];
+
+    const [total, tickets] = await Promise.all([
+        Ticket.countDocuments(query),
+        Ticket.find(query).sort({ issueDateTime: -1 }).skip(skip).limit(limit)
+    ]);
+
+    return { total, tickets };
+}
+
+async function runTextAllTicketsSearch({ statusQuery, searchTerm, lowerSearch, skip, limit }) {
+    const searchRegex = new RegExp(escapeRegex(searchTerm), 'i');
+    const matchingAgents = await Agent.find({
+        $or: [{ agentId: searchRegex }, { name: searchRegex }]
+    }).select('agentId');
+    const matchingAgentIds = matchingAgents.map((agent) => agent.agentId);
+
+    const andFilters = [{ ...statusQuery }];
+    if (matchingAgentIds.length > 0) {
+        andFilters.push({
+            $or: [
+                { $text: { $search: searchTerm } },
+                { agentId: { $in: matchingAgentIds } }
+            ]
+        });
+    } else {
+        andFilters.push({ $text: { $search: searchTerm } });
+    }
+
+    const match = andFilters.length === 1 ? andFilters[0] : { $and: andFilters };
+
+    const [total, tickets] = await Promise.all([
+        Ticket.countDocuments(match),
+        Ticket.aggregate([
+            { $match: match },
+            {
+                $addFields: {
+                    _textScore: { $meta: 'textScore' },
+                    _exactTicket: {
+                        $cond: [{ $eq: [{ $toLower: '$ticketId' }, lowerSearch] }, 1, 0]
+                    },
+                    _exactDisplay: {
+                        $cond: [{ $eq: [{ $toLower: '$displayId' }, lowerSearch] }, 1, 0]
+                    }
+                }
+            },
+            { $sort: { _exactTicket: -1, _exactDisplay: -1, _textScore: -1, issueDateTime: -1 } },
+            { $skip: skip },
+            { $limit: limit },
+            { $project: { _textScore: 0, _exactTicket: 0, _exactDisplay: 0 } }
+        ])
+    ]);
+
+    return { total, tickets };
+}
+
 async function processAttachments(attachments) {
     if (!attachments || !Array.isArray(attachments)) return attachments;
 
@@ -82,31 +232,65 @@ export async function getAgentTicketsData({ agentId, page = 1, limit = 10, searc
     const baseQuery = {
         agentId: { $regex: new RegExp(`^${agentId}$`, 'i') }
     };
-    const query = { ...baseQuery };
+    const statusQuery = buildAgentStatusQuery(status);
+    const query = { ...baseQuery, ...statusQuery };
+    const searchTerm = String(search || '').trim();
+    const lowerSearch = searchTerm.toLowerCase();
 
-    if (status === 'ARCHIVE') {
-        query.status = { $in: ['RESOLVED', 'REJECTED', 'PENDING_CUSTOMER'] };
-    } else if (status === 'ACTIVE') {
-        query.status = { $nin: ['RESOLVED', 'REJECTED'] };
-    } else if (status && status !== 'ALL' && status !== 'RAISED') {
-        query.status = status;
+    let total = 0;
+    let tickets = [];
+
+    if (!searchTerm) {
+        [total, tickets] = await Promise.all([
+            Ticket.countDocuments(query),
+            Ticket.find(query).sort({ issueDateTime: -1 }).skip(skip).limit(safeLimit)
+        ]);
+    } else if (USE_TEXT_SEARCH) {
+        try {
+            const textResult = await runTextAgentSearch({
+                baseQuery: query,
+                searchTerm,
+                lowerSearch,
+                skip,
+                limit: safeLimit
+            });
+
+            if (textResult.total > 0) {
+                total = textResult.total;
+                tickets = textResult.tickets;
+            } else {
+                const fallback = await runRegexAgentSearch({
+                    baseQuery: query,
+                    searchTerm,
+                    skip,
+                    limit: safeLimit
+                });
+                total = fallback.total;
+                tickets = fallback.tickets;
+            }
+        } catch (err) {
+            console.warn('[SEARCH] Falling back to regex for agent tickets', err.message);
+            const fallback = await runRegexAgentSearch({
+                baseQuery: query,
+                searchTerm,
+                skip,
+                limit: safeLimit
+            });
+            total = fallback.total;
+            tickets = fallback.tickets;
+        }
+    } else {
+        const fallback = await runRegexAgentSearch({
+            baseQuery: query,
+            searchTerm,
+            skip,
+            limit: safeLimit
+        });
+        total = fallback.total;
+        tickets = fallback.tickets;
     }
 
-    if (search && String(search).trim()) {
-        const searchStr = String(search).trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-        const searchRegex = new RegExp(searchStr, 'i');
-        query.$or = [
-            { ticketId: searchRegex },
-            { displayId: searchRegex },
-            { description: searchRegex }
-        ];
-    }
-
-    const [total, tickets, resolvedTickets] = await Promise.all([
-        Ticket.countDocuments(query),
-        Ticket.find(query).sort({ issueDateTime: -1 }).skip(skip).limit(safeLimit),
-        Ticket.find({ ...baseQuery, status: 'RESOLVED' })
-    ]);
+    const resolvedTickets = await Ticket.find({ ...baseQuery, status: 'RESOLVED' });
 
     const totalResolved = resolvedTickets.length;
     const totalHandleTime = resolvedTickets.reduce((acc, t) => {
@@ -133,40 +317,63 @@ export async function getAllTicketsData({ page = 1, limit = 10, search = '', sta
     const safeLimit = Math.min(Math.max(parseInt(limit, 10) || 10, 1), 100);
     const skip = (safePage - 1) * safeLimit;
 
-    const query = {};
+    const statusQuery = buildAllTicketsStatusQuery(status);
+    const searchTerm = String(search || '').trim();
+    const lowerSearch = searchTerm.toLowerCase();
 
-    if (search && String(search).trim()) {
-        const searchStr = String(search).trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-        const searchRegex = new RegExp(searchStr, 'i');
+    let total = 0;
+    let tickets = [];
 
-        const matchingAgents = await Agent.find({
-            $or: [{ agentId: searchRegex }, { name: searchRegex }]
-        }).select('agentId');
-        const matchingAgentIds = matchingAgents.map(a => a.agentId);
+    if (!searchTerm) {
+        total = await Ticket.countDocuments(statusQuery);
+        tickets = await Ticket.find(statusQuery)
+            .sort({ issueDateTime: -1 })
+            .skip(skip)
+            .limit(safeLimit);
+    } else if (USE_TEXT_SEARCH) {
+        try {
+            const textResult = await runTextAllTicketsSearch({
+                statusQuery,
+                searchTerm,
+                lowerSearch,
+                skip,
+                limit: safeLimit
+            });
 
-        query.$or = [
-            { ticketId: searchRegex },
-            { displayId: searchRegex },
-            { description: searchRegex },
-            { agentId: { $in: matchingAgentIds } }
-        ];
+            if (textResult.total > 0) {
+                total = textResult.total;
+                tickets = textResult.tickets;
+            } else {
+                const fallback = await runRegexAllTicketsSearch({
+                    statusQuery,
+                    searchTerm,
+                    skip,
+                    limit: safeLimit
+                });
+                total = fallback.total;
+                tickets = fallback.tickets;
+            }
+        } catch (err) {
+            console.warn('[SEARCH] Falling back to regex for all tickets', err.message);
+            const fallback = await runRegexAllTicketsSearch({
+                statusQuery,
+                searchTerm,
+                skip,
+                limit: safeLimit
+            });
+            total = fallback.total;
+            tickets = fallback.tickets;
+        }
+    } else {
+        const fallback = await runRegexAllTicketsSearch({
+            statusQuery,
+            searchTerm,
+            skip,
+            limit: safeLimit
+        });
+        total = fallback.total;
+        tickets = fallback.tickets;
     }
-
-    if (status === 'ACTIVE') {
-        query.status = { $nin: ['RESOLVED', 'REJECTED'] };
-    } else if (status === 'RESOLVED') {
-        query.status = { $in: ['RESOLVED', 'REJECTED'] };
-    } else if (status === 'PRIORITY') {
-        const oneDayAgo = Date.now() - 86400000;
-        query.status = { $nin: ['RESOLVED', 'REJECTED'] };
-        query.issueDateTime = { $lt: oneDayAgo };
-    }
-
-    const total = await Ticket.countDocuments(query);
-    const tickets = await Ticket.find(query)
-        .sort({ issueDateTime: -1 })
-        .skip(skip)
-        .limit(safeLimit);
 
     return {
         tickets,
