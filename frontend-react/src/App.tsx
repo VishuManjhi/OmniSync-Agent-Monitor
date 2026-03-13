@@ -7,6 +7,7 @@ import AgentDashboard from './components/AgentDashboard';
 import ProtectedRoute from './components/ProtectedRoute';
 import NotificationContainer from './components/ui/Notification';
 import LandingHelp from './components/LandingHelp';
+import ProductInfo from './components/ProductInfo';
 
 // Helper component to handle initial landing and role-based redirect
 const HomeRedirect: React.FC = () => {
@@ -35,6 +36,7 @@ const App: React.FC = () => {
       <Routes>
         <Route path="/" element={<LandingHelp />} />
         <Route path="/help" element={<LandingHelp />} />
+        <Route path="/pricing" element={<ProductInfo />} />
         <Route path="/login" element={<Login />} />
 
         <Route

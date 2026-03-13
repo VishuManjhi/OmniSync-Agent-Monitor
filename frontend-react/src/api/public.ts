@@ -39,3 +39,14 @@ export async function submitPublicFeedback(payload: {
 
     return res.json();
 }
+
+export async function captureLead(payload: {
+    name: string;
+    email: string;
+    message: string;
+}) {
+    return submitPublicFeedback({
+        ...payload,
+        category: 'general'
+    });
+}
