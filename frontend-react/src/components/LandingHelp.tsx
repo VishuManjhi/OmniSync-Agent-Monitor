@@ -14,7 +14,9 @@ import {
     TrendingUp,
     Cpu,
     Globe,
-    Monitor
+    Monitor,
+    Headphones,
+    ChevronDown
 } from 'lucide-react';
 import { captureLead } from '../api/public';
 import '../styles/landingHelp.css';
@@ -113,6 +115,7 @@ const LandingHelp: React.FC = () => {
     const [category, setCategory] = useState<'general' | 'feature' | 'bug' | 'support'>('general');
     const [message, setMessage] = useState('');
     const [statusMessage, setStatusMessage] = useState('');
+    const [feedbackOpen, setFeedbackOpen] = useState(false);
 
     // Card Deck State
     const [deckIndex, setDeckIndex] = useState(0);
@@ -127,10 +130,8 @@ const LandingHelp: React.FC = () => {
 
     const getCardStyle = (index: number) => {
         const total = PRODUCT_FEATURES.length;
-        // Calculate offset so the active card is centered
         const offset = (index - deckIndex + total) % total;
 
-        // Active card (Center)
         if (offset === 0) {
             return {
                 transform: 'translateZ(0) scale(1) translateX(0)',
@@ -140,7 +141,6 @@ const LandingHelp: React.FC = () => {
             };
         }
 
-        // Cards going into the distance
         if (offset < 4) {
             return {
                 transform: `translateZ(${-150 * offset}px) translateY(${-40 * offset}px) rotateX(${-5 * offset}deg) scale(${1 - 0.1 * offset})`,
@@ -150,7 +150,6 @@ const LandingHelp: React.FC = () => {
             };
         }
 
-        // Hidden/Recycled
         return {
             transform: 'translateZ(-1000px) scale(0.5)',
             opacity: 0,
@@ -167,12 +166,17 @@ const LandingHelp: React.FC = () => {
             setCategory('general');
             setMessage('');
             setStatusMessage('Feedback received successfully.');
+            setTimeout(() => setStatusMessage(''), 4000);
+        },
+        onError: () => {
+            setStatusMessage('Failed to send. Please ensure the backend is running.');
+            setTimeout(() => setStatusMessage(''), 4000);
         }
     });
 
     const handleSubmit = (e: React.FormEvent) => {
         e.preventDefault();
-        feedbackMutation.mutate({ name, email, message: `Landing Feedback: ${message}` });
+        feedbackMutation.mutate({ name, email, message: `[${category.toUpperCase()}] ${message}` });
     };
 
     return (
@@ -281,37 +285,80 @@ const LandingHelp: React.FC = () => {
                 </div>
             </section>
 
+            {/* Expandable Feedback Bar */}
             <section className="landing-section section-smaller" id="feedback">
-                <div className="landing-form">
-                    <div style={{ textAlign: 'center', marginBottom: '40px' }}>
-                        <h2 className="landing-section-title" style={{ fontSize: '2.5rem' }}>Send Feedback</h2>
-                    </div>
-                    <form onSubmit={handleSubmit}>
-                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px' }}>
-                            <input className="landing-input" placeholder="Name" value={name} onChange={(e) => setName(e.target.value)} required />
-                            <input className="landing-input" type="email" placeholder="Email" value={email} onChange={(e) => setEmail(e.target.value)} required />
+                <div style={{ maxWidth: '700px', margin: '0 auto' }}>
+                    <div
+                        onClick={() => setFeedbackOpen(!feedbackOpen)}
+                        style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'space-between',
+                            background: '#fff',
+                            border: '1px solid rgba(15,23,42,0.1)',
+                            borderRadius: feedbackOpen ? '20px 20px 0 0' : '20px',
+                            padding: '20px 28px',
+                            cursor: 'pointer',
+                            transition: 'all 0.3s ease',
+                            boxShadow: '0 4px 20px rgba(0,0,0,0.04)'
+                        }}
+                    >
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '12px', color: '#94a3b8', fontSize: '1.05rem', fontWeight: '500' }}>
+                            <MessageCircle size={20} />
+                            Send us feedback...
                         </div>
-                        <select
-                            className="landing-input"
-                            value={category}
-                            onChange={(e) => {
-                                const next = e.target.value;
-                                if (isFeedbackCategory(next)) {
-                                    setCategory(next);
-                                }
-                            }}
-                        >
-                            <option value="general">General</option>
-                            <option value="feature">Feature</option>
-                            <option value="bug">Bug</option>
-                        </select>
-                        <textarea className="landing-input" style={{ minHeight: '120px' }} placeholder="Message" value={message} onChange={(e) => setMessage(e.target.value)} required />
-                        <button className="landing-btn landing-btn-accent" type="submit" style={{ justifyContent: 'center' }}>
-                            Submit <MessageCircle size={20} />
-                        </button>
-                        {statusMessage && <p style={{ textAlign: 'center', color: '#10b981', fontWeight: '800', marginTop: '12px' }}>{statusMessage}</p>}
-                    </form>
+                        <ChevronDown size={20} style={{ color: '#94a3b8', transform: feedbackOpen ? 'rotate(180deg)' : 'rotate(0)', transition: 'transform 0.3s' }} />
+                    </div>
+
+                    {feedbackOpen && (
+                        <div style={{
+                            background: '#fff',
+                            border: '1px solid rgba(15,23,42,0.1)',
+                            borderTop: 'none',
+                            borderRadius: '0 0 20px 20px',
+                            padding: '28px',
+                            animation: 'fadeIn 0.3s ease'
+                        }}>
+                            <form onSubmit={handleSubmit} style={{ display: 'grid', gap: '16px' }}>
+                                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
+                                    <input className="landing-input" placeholder="Name" value={name} onChange={(e) => setName(e.target.value)} required style={{ padding: '14px 20px', borderRadius: '12px', fontSize: '0.95rem' }} />
+                                    <input className="landing-input" type="email" placeholder="Email" value={email} onChange={(e) => setEmail(e.target.value)} required style={{ padding: '14px 20px', borderRadius: '12px', fontSize: '0.95rem' }} />
+                                </div>
+                                <select
+                                    className="landing-input"
+                                    value={category}
+                                    onChange={(e) => {
+                                        const next = e.target.value;
+                                        if (isFeedbackCategory(next)) {
+                                            setCategory(next);
+                                        }
+                                    }}
+                                    style={{ padding: '14px 20px', borderRadius: '12px', fontSize: '0.95rem' }}
+                                >
+                                    <option value="general">General</option>
+                                    <option value="feature">Feature Request</option>
+                                    <option value="bug">Bug Report</option>
+                                    <option value="support">Support</option>
+                                </select>
+                                <textarea className="landing-input" style={{ minHeight: '100px', padding: '14px 20px', borderRadius: '12px', fontSize: '0.95rem' }} placeholder="Your message..." value={message} onChange={(e) => setMessage(e.target.value)} required />
+                                <button className="landing-btn landing-btn-accent" type="submit" style={{ justifyContent: 'center', padding: '14px 32px', borderRadius: '12px' }}>
+                                    Submit <MessageCircle size={18} />
+                                </button>
+                                {statusMessage && <p style={{ textAlign: 'center', color: statusMessage.includes('Failed') ? '#ef4444' : '#10b981', fontWeight: '700', fontSize: '0.95rem' }}>{statusMessage}</p>}
+                            </form>
+                        </div>
+                    )}
                 </div>
+            </section>
+
+            {/* Support Section */}
+            <section style={{ textAlign: 'center', padding: '60px 40px', background: 'rgba(15,23,42,0.03)', borderRadius: '40px', maxWidth: '900px', margin: '0 auto 60px' }}>
+                <Headphones size={36} style={{ color: '#64748b', marginBottom: '16px' }} />
+                <h3 style={{ fontSize: '1.6rem', fontWeight: '800', marginBottom: '8px', color: '#0f172a' }}>Need Direct Support?</h3>
+                <p style={{ color: '#64748b', fontSize: '1rem', marginBottom: '16px' }}>Send your queries directly to our support inbox</p>
+                <a href="mailto:cd88b9210ea516ca7b805579a78fb779@inbound.postmarkapp.com" style={{ color: '#0f172a', fontWeight: '700', fontSize: '0.95rem', textDecoration: 'none', background: '#f1f5f9', padding: '12px 24px', borderRadius: '12px', display: 'inline-block', wordBreak: 'break-all' }}>
+                    cd88b9210ea516ca7b805579a78fb779@inbound.postmarkapp.com
+                </a>
             </section>
 
             <footer style={{ textAlign: 'center', padding: '60px 40px', color: 'var(--text-dim)', borderTop: '1px solid var(--border)' }}>

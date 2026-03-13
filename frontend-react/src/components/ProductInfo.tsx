@@ -12,17 +12,19 @@ import {
     X,
     Mail,
     Layers,
-    TrendingUp
+    TrendingUp,
+    Headphones
 } from 'lucide-react';
-import { captureLead } from '../api/public';
+import { requestOnboarding } from '../api/public';
 import '../styles/landingHelp.css';
 
 const ProductInfo: React.FC = () => {
     const navigate = useNavigate();
     const [email, setEmail] = useState('');
-    const [statusMessage, setStatusMessage] = useState('');
     const [showExperience, setShowExperience] = useState(false);
     const [experienceIndex, setExperienceIndex] = useState(0);
+    const [showIntroPopup, setShowIntroPopup] = useState(false);
+    const [introError, setIntroError] = useState('');
 
     const welcomeSectionRef = useRef<HTMLDivElement>(null);
     const leadFormRef = useRef<HTMLDivElement>(null);
@@ -36,10 +38,15 @@ const ProductInfo: React.FC = () => {
     };
 
     const feedbackMutation = useMutation({
-        mutationFn: captureLead,
+        mutationFn: (email: string) => requestOnboarding(email),
         onSuccess: () => {
             setEmail('');
-            setStatusMessage('Welcome onboard! A premium intro package is being drafted for you.');
+            setIntroError('');
+            setShowIntroPopup(true);
+            setTimeout(() => setShowIntroPopup(false), 5000);
+        },
+        onError: () => {
+            setIntroError('Could not submit. Please check that the backend server is running on port 3003.');
         }
     });
 
@@ -100,7 +107,7 @@ const ProductInfo: React.FC = () => {
 
     return (
         <div className="light-marketing landing-page">
-            <nav className="landing-topbar" style={{ background: 'rgba(255,255,255,0.7)', backdropFilter: 'blur(20px)', borderBottom: '1px solid var(--border)', width: '100%', maxWidth: 'none', transform: 'none', left: '0', position: 'fixed' }}>
+            <nav className="landing-topbar" style={{ background: 'rgba(255,255,255,0.7)', backdropFilter: 'blur(20px)', borderBottom: '1px solid rgba(15,23,42,0.08)', width: '100%', maxWidth: 'none', transform: 'none', left: '0', position: 'fixed' }}>
                 <div className="landing-brand" style={{ marginLeft: '40px' }} onClick={() => navigate('/')}>RestroBoard</div>
                 <div className="landing-top-actions" style={{ marginRight: '40px' }}>
                     <button className="landing-btn" style={{ background: 'transparent' }} onClick={() => navigate('/')}>Back</button>
@@ -108,7 +115,7 @@ const ProductInfo: React.FC = () => {
             </nav>
 
             <section ref={welcomeSectionRef} className="pricing-hero">
-                <div className="animate-float" style={{ color: 'var(--primary)', marginBottom: '24px' }}>
+                <div className="animate-float" style={{ color: '#64748b', marginBottom: '24px' }}>
                     <Layers size={56} strokeWidth={1} />
                 </div>
                 <h1 className="landing-title" style={{ fontSize: '4.2rem', maxWidth: '900px', color: '#0f172a', letterSpacing: '-3px' }}>Luxury Architecture for High-Performance Dining</h1>
@@ -129,14 +136,14 @@ const ProductInfo: React.FC = () => {
             {showExperience && (
                 <div className="experience-modal-overlay">
                     <div className="experience-modal-card">
-                        <button style={{ position: 'absolute', top: '48px', right: '48px', background: 'transparent', border: 'none', cursor: 'pointer', color: 'var(--text-dim)' }} onClick={() => setShowExperience(false)}>
+                        <button style={{ position: 'absolute', top: '48px', right: '48px', background: 'transparent', border: 'none', cursor: 'pointer', color: '#94a3b8' }} onClick={() => setShowExperience(false)}>
                             <X size={40} />
                         </button>
 
                         <div style={{ textAlign: 'left', paddingBottom: '40px' }}>
-                            <div style={{ color: 'var(--primary)', marginBottom: '20px' }}>{features[experienceIndex].icon}</div>
+                            <div style={{ color: '#64748b', marginBottom: '20px' }}>{features[experienceIndex].icon}</div>
                             <h2 style={{ fontSize: '2.5rem', fontWeight: '900', marginBottom: '20px', letterSpacing: '-1.5px', color: '#000', lineHeight: 1.1 }}>{features[experienceIndex].title}</h2>
-                            <p style={{ fontSize: '1.15rem', color: 'var(--text-dim)', lineHeight: '1.6', fontWeight: '400', maxWidth: '650px' }}>{features[experienceIndex].desc}</p>
+                            <p style={{ fontSize: '1.15rem', color: '#64748b', lineHeight: '1.6', fontWeight: '400', maxWidth: '650px' }}>{features[experienceIndex].desc}</p>
                         </div>
 
                         <div className="modal-nav-btn" onClick={() => setExperienceIndex((prev) => (prev + 1) % features.length)}>
@@ -150,6 +157,47 @@ const ProductInfo: React.FC = () => {
                 </div>
             )}
 
+            {/* Center-Screen Intro Success Popup */}
+            {showIntroPopup && (
+                <div style={{
+                    position: 'fixed',
+                    inset: 0,
+                    background: 'rgba(15,23,42,0.5)',
+                    backdropFilter: 'blur(8px)',
+                    zIndex: 3000,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    animation: 'fadeIn 0.3s ease'
+                }}>
+                    <div style={{
+                        background: '#fff',
+                        borderRadius: '24px',
+                        padding: '60px',
+                        maxWidth: '480px',
+                        width: '90%',
+                        textAlign: 'center',
+                        boxShadow: '0 40px 80px rgba(0,0,0,0.2)',
+                        animation: 'modalPop 0.4s cubic-bezier(0.19, 1, 0.22, 1)'
+                    }}>
+                        <div style={{ width: '64px', height: '64px', background: '#ecfdf5', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 24px' }}>
+                            <Check size={32} style={{ color: '#10b981' }} />
+                        </div>
+                        <h3 style={{ fontSize: '1.8rem', fontWeight: '900', marginBottom: '12px', color: '#0f172a' }}>Welcome Onboard!</h3>
+                        <p style={{ color: '#64748b', fontSize: '1.05rem', lineHeight: 1.5 }}>
+                            A premium intro package is being drafted for you. Our team will reach out shortly with your personalized onboarding kit.
+                        </p>
+                        <button
+                            onClick={() => setShowIntroPopup(false)}
+                            className="landing-btn landing-btn-dark"
+                            style={{ marginTop: '28px', padding: '14px 40px' }}
+                        >
+                            Got it
+                        </button>
+                    </div>
+                </div>
+            )}
+
             <section className="landing-section">
                 <div className="section-head">
                     <h2 className="landing-section-title">Investment Strategy</h2>
@@ -159,7 +207,7 @@ const ProductInfo: React.FC = () => {
                     {pricingTiers.map((tier, i) => (
                         <div key={i} className={`pricing-card ${tier.featured ? 'featured' : ''}`}>
                             <h3 style={{ fontSize: '2.2rem', fontWeight: '900', letterSpacing: '-1.5px', color: '#0f172a' }}>{tier.name}</h3>
-                            <p style={{ color: 'var(--text-dim)', marginTop: '8px', fontWeight: '500', fontSize: '1.1rem' }}>{tier.desc}</p>
+                            <p style={{ color: '#64748b', marginTop: '8px', fontWeight: '500', fontSize: '1.1rem' }}>{tier.desc}</p>
                             <div className="price-tag" style={{ color: '#0f172a' }}>{tier.price}<span style={{ fontSize: '1.5rem', marginLeft: '8px', color: '#94a3b8', opacity: 0.6 }}>{tier.price !== 'Custom' ? '/mo' : ''}</span></div>
                             <ul className="feature-list" style={{ listStyle: 'none', padding: 0 }}>
                                 {tier.features.map((f, j) => (
@@ -179,28 +227,38 @@ const ProductInfo: React.FC = () => {
             <section className="landing-section" ref={leadFormRef} style={{ scrollMarginTop: '120px' }}>
                 <div className="landing-form">
                     <div style={{ textAlign: 'center', marginBottom: '64px' }}>
-                        <Mail size={80} style={{ color: 'var(--primary)', marginBottom: '32px' }} />
+                        <Mail size={80} style={{ color: '#64748b', marginBottom: '32px' }} />
                         <h2 style={{ fontSize: '3.5rem', fontWeight: '900', marginBottom: '24px', letterSpacing: '-2px' }}>Secure Your Architecture</h2>
                         <p className="landing-section-subtitle">Schedule a consultation and receive your high-fidelity onboarding package.</p>
                     </div>
-                    <form onSubmit={(e) => { e.preventDefault(); feedbackMutation.mutate({ name: 'VIP Lead', email, message: 'Strategic Inquiry from Marketing Flow' }); }} className="lead-capture-form">
+                    <form onSubmit={(e) => { e.preventDefault(); feedbackMutation.mutate(email); }} className="lead-capture-form">
                         <input className="landing-input" type="email" placeholder="executive.name@group.com" value={email} onChange={(e) => setEmail(e.target.value)} required />
                         <button className="landing-btn landing-btn-accent" type="submit" style={{ padding: '24px 60px' }}>
                             Get my intro <ArrowRight size={24} />
                         </button>
                     </form>
-                    {statusMessage && <p style={{ marginTop: '40px', color: '#10b981', fontWeight: '900', fontSize: '1.4rem', textAlign: 'center' }}>{statusMessage}</p>}
+                    {introError && <p style={{ marginTop: '20px', color: '#ef4444', fontWeight: '700', fontSize: '1rem', textAlign: 'center' }}>{introError}</p>}
                 </div>
             </section>
 
-            <footer style={{ padding: '120px 60px', borderTop: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            {/* Support Section */}
+            <section style={{ textAlign: 'center', padding: '60px 40px', background: 'rgba(15,23,42,0.03)', borderRadius: '40px', maxWidth: '900px', margin: '0 auto 60px' }}>
+                <Headphones size={36} style={{ color: '#64748b', marginBottom: '16px' }} />
+                <h3 style={{ fontSize: '1.6rem', fontWeight: '800', marginBottom: '8px', color: '#0f172a' }}>Need Direct Support?</h3>
+                <p style={{ color: '#64748b', fontSize: '1rem', marginBottom: '16px' }}>Send your queries directly to our support inbox</p>
+                <a href="mailto:cd88b9210ea516ca7b805579a78fb779@inbound.postmarkapp.com" style={{ color: '#0f172a', fontWeight: '700', fontSize: '0.95rem', textDecoration: 'none', background: '#f1f5f9', padding: '12px 24px', borderRadius: '12px', display: 'inline-block', wordBreak: 'break-all' as const }}>
+                    cd88b9210ea516ca7b805579a78fb779@inbound.postmarkapp.com
+                </a>
+            </section>
+
+            <footer style={{ padding: '120px 60px', borderTop: '1px solid rgba(15,23,42,0.08)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <div className="landing-brand">RestroBoard</div>
-                <div style={{ display: 'flex', gap: '48px', color: 'var(--text-dim)', fontSize: '1.1rem', fontWeight: '700' }}>
+                <div style={{ display: 'flex', gap: '48px', color: '#64748b', fontSize: '1.1rem', fontWeight: '700' }}>
                     <span>Strategy</span>
                     <span>Privacy</span>
                     <span>Systems Status</span>
                 </div>
-                <div style={{ color: 'var(--text-dim)', fontWeight: '700' }}>
+                <div style={{ color: '#64748b', fontWeight: '700' }}>
                     &copy; {new Date().getFullYear()} RestroBoard Global Advisory.
                 </div>
             </footer>

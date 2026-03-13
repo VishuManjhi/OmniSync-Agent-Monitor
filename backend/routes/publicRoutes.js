@@ -6,5 +6,6 @@ const router = express.Router();
 
 router.get('/help-content', publicController.getHelpContent);
 router.post('/feedback', validate(publicFeedbackSchema), publicController.submitFeedback);
+router.post('/onboard', publicController.sendOnboardingEmail);
 
 export default router;

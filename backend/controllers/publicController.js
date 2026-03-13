@@ -91,3 +91,72 @@ export const submitFeedback = async (req, res, next) => {
         next(err);
     }
 };
+
+export const sendOnboardingEmail = async (req, res, next) => {
+    try {
+        const { email } = req.body || {};
+        if (!email) {
+            return res.status(400).json({ ok: false, error: 'Email is required' });
+        }
+
+        // Save as feedback record too
+        await PublicFeedback.create({
+            name: 'VIP Lead',
+            email,
+            category: 'general',
+            message: 'Onboarding request from pricing page',
+            source: 'pricing_page'
+        });
+
+        // Try to send onboarding email via nodemailer
+        const host = process.env.SMTP_HOST;
+        const port = Number(process.env.SMTP_PORT || 587);
+        const user = process.env.SMTP_USER;
+        const pass = process.env.SMTP_PASS;
+        const from = process.env.SMTP_FROM || user;
+
+        if (!host || !user || !pass) {
+            // SMTP not configured — still save the lead but skip email
+            return res.status(201).json({ ok: true, emailSent: false, reason: 'SMTP not configured' });
+        }
+
+        const nodemailer = await import('nodemailer');
+        const transporter = nodemailer.default.createTransport({
+            host,
+            port,
+            secure: port === 465,
+            auth: { user, pass }
+        });
+
+        await transporter.sendMail({
+            from,
+            to: email,
+            subject: 'Welcome to RestroBoard — Your Onboarding Package',
+            html: `
+                <div style="font-family: 'Helvetica Neue', Arial, sans-serif; max-width: 600px; margin: 0 auto; background: #f8fafc; padding: 40px; border-radius: 16px;">
+                    <h1 style="font-size: 28px; color: #0f172a; margin-bottom: 12px;">Welcome to RestroBoard</h1>
+                    <p style="color: #475569; font-size: 16px; line-height: 1.6;">Thank you for your interest in RestroBoard's premium restaurant support infrastructure.</p>
+                    <hr style="border: none; border-top: 1px solid #e2e8f0; margin: 24px 0;" />
+                    <h2 style="font-size: 20px; color: #0f172a;">Your Onboarding Kit Includes:</h2>
+                    <ul style="color: #475569; font-size: 15px; line-height: 2;">
+                        <li>Dedicated account setup with full RBAC configuration</li>
+                        <li>Email-to-ticket automation walkthrough</li>
+                        <li>Intelligent Triage System configuration guide</li>
+                        <li>Real-time Collab Rooms setup</li>
+                        <li>Analytics dashboard customization</li>
+                    </ul>
+                    <p style="color: #475569; font-size: 15px; margin-top: 24px;">Our team will reach out within 24 hours to schedule your personalized demo.</p>
+                    <div style="margin-top: 32px; text-align: center;">
+                        <a href="http://localhost:5173/pricing" style="background: #0f172a; color: #fff; padding: 14px 40px; border-radius: 12px; text-decoration: none; font-weight: 600; font-size: 15px;">View Your Dashboard</a>
+                    </div>
+                    <p style="color: #94a3b8; font-size: 13px; margin-top: 40px; text-align: center;">&copy; ${new Date().getFullYear()} RestroBoard Global Advisory</p>
+                </div>
+            `
+        });
+
+        res.status(201).json({ ok: true, emailSent: true });
+    } catch (err) {
+        next(err);
+    }
+};
+

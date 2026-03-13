@@ -50,3 +50,24 @@ export async function captureLead(payload: {
         category: 'general'
     });
 }
+
+export async function requestOnboarding(email: string) {
+    const res = await fetch(`${API_BASE_URL}/api/public/onboard`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email })
+    });
+
+    if (!res.ok) {
+        let message = `HTTP ${res.status}`;
+        try {
+            const body = await res.json();
+            if (body?.error) message = body.error;
+        } catch {
+            // ignore
+        }
+        throw new Error(message);
+    }
+
+    return res.json();
+}
