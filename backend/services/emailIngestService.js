@@ -101,6 +101,31 @@ export async function ingestIncomingEmail(payload) {
         }
     });
 
+    // REOPEN LOGIC: Check if this is a reply to a PENDING_CUSTOMER or RESOLVED ticket
+    const existingTicket = await Ticket.findOne({
+        'emailMeta.customerEmail': customerEmail,
+        status: { $in: ['PENDING_CUSTOMER', 'RESOLVED'] }
+    }).sort({ updatedAt: -1 });
+
+    if (existingTicket) {
+        await Ticket.updateOne(
+            { _id: existingTicket._id },
+            {
+                $set: { status: 'REOPENED' },
+                $push: {
+                    'emailMeta.replies': {
+                        direction: 'inbound',
+                        message: textBody,
+                        providerMessageId,
+                        at: now
+                    }
+                }
+            }
+        );
+        // We still let it return the new creation ticketId for dedupe safety or log it
+        // but the existing one is now back in the queue.
+    }
+
     let assigned = null;
     try {
         assigned = await assignTicket(creation.ticketId);

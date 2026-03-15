@@ -34,7 +34,7 @@ const ticketSchema = new mongoose.Schema({
     description: { type: String },
     status: {
         type: String,
-        enum: ['OPEN', 'ASSIGNED', 'IN_PROGRESS', 'PENDING_CUSTOMER', 'RESOLUTION_REQUESTED', 'RESOLVED', 'REJECTED'],
+        enum: ['OPEN', 'ASSIGNED', 'IN_PROGRESS', 'PENDING_CUSTOMER', 'RESOLUTION_REQUESTED', 'RESOLVED', 'REJECTED', 'REOPENED'],
         default: 'OPEN'
     },
     issueDateTime: { type: Number, required: true },
@@ -82,6 +82,22 @@ const ticketSchema = new mongoose.Schema({
         inboundAt: { type: Number },
         lastOutboundAt: { type: Number },
         replies: { type: [emailReplySchema], default: [] }
+    },
+    solutionFeedback: {
+        suggestedSolution: { type: String },
+        source: { type: String, enum: ['historical', 'orama', 'bootstrap', 'manual', null], default: null },
+        appliedAt: { type: Number },
+        feedbackToken: { type: String },
+        // Customer feedback (from email links)
+        customerRating: { type: Number, min: 1, max: 3, default: null },
+        customerResolvedViaEmail: { type: Boolean, default: false },
+        customerFeedbackAt: { type: Number },
+        // Agent feedback (post-send rating)
+        agentRating: { type: Number, min: 1, max: 3, default: null },
+        agentNotes: { type: String },
+        agentFeedbackAt: { type: Number },
+        // Computed confidence
+        confidenceScore: { type: Number, default: 0 }
     }
 }, { timestamps: true });
 

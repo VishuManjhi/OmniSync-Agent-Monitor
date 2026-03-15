@@ -165,3 +165,29 @@ export const getSupervisorActivity = async (req, res, next) => {
         next(err);
     }
 };
+
+/**
+ * Submit feedback from an agent about a suggested solution post-send
+ */
+export const submitAgentSolutionFeedback = async (req, res, next) => {
+    try {
+        const { rating, notes } = req.body;
+        const ticketId = req.params.ticketId;
+
+        const updateData = {
+            'solutionFeedback.agentRating': Number(rating),
+            'solutionFeedback.agentNotes': notes,
+            'solutionFeedback.agentFeedbackAt': Date.now()
+        };
+
+        const result = await Ticket.updateOne(
+            { $or: [{ _id: ticketId }, { ticketId }] },
+            { $set: updateData }
+        );
+
+        res.json({ ok: true, matched: result.matchedCount });
+    } catch (err) {
+        next(err);
+    }
+};
+

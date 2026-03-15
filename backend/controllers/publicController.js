@@ -160,3 +160,45 @@ export const sendOnboardingEmail = async (req, res, next) => {
     }
 };
 
+/**
+ * Handle public feedback/resolve actions from emails via tokens
+ */
+export const handleTicketAction = async (req, res, next) => {
+    try {
+        const { token, rating, resolve } = req.query;
+        if (!token) return res.status(400).send('<h1>Invalid Link</h1>');
+
+        const ticket = await Ticket.findOne({ 'solutionFeedback.feedbackToken': token });
+        if (!ticket) return res.status(404).send('<h1>Link Expired or Invalid</h1>');
+
+        const updateSet = {
+            'solutionFeedback.customerRating': Number(rating) || undefined,
+            'solutionFeedback.customerFeedbackAt': Date.now()
+        };
+
+        if (resolve === 'true') {
+            updateSet.status = 'RESOLVED';
+            updateSet['solutionFeedback.customerResolvedViaEmail'] = true;
+            updateSet['resolution.status'] = 'RESOLVED';
+            updateSet['resolution.resolvedAt'] = Date.now();
+            updateSet['resolution.notes'] = 'Resolved via customer feedback email';
+        }
+
+        await Ticket.updateOne({ _id: ticket._id }, { $set: updateSet });
+
+        res.send(`
+            <div style="font-family: sans-serif; text-align: center; padding: 50px; color: #334155;">
+                <h1 style="color: #10b981;">Thank You!</h1>
+                <p>Your feedback has been received and helps us improve our service.</p>
+                ${resolve === 'true' ? '<p>The ticket has been marked as <b>Resolved</b>.</p>' : ''}
+                <div style="margin-top: 30px;">
+                    <button onclick="window.close()" style="background: #e2e8f0; border: none; padding: 10px 20px; border-radius: 6px; cursor: pointer;">Close Window</button>
+                </div>
+            </div>
+        `);
+    } catch (err) {
+        next(err);
+    }
+};
+
+

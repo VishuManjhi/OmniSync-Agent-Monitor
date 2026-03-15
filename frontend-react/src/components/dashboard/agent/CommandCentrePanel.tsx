@@ -9,7 +9,13 @@ type TopSolutionOption = {
     usageCount: number;
     lastUsedAt: number | null;
     source: 'historical' | 'bootstrap' | string;
+    confidence?: number;
 };
+
+interface SentSolutionFeedback {
+    ticketId: string;
+    solutionText: string;
+}
 
 interface CommandCentreProps {
     currentStatus: string;
@@ -40,6 +46,7 @@ interface CommandCentreProps {
     closeTopSolutionsModal: () => void;
     onOpenRoom: (ticketId: string) => void;
     isSessionLoading: boolean;
+    onSubmitFeedback: (ticketId: string, rating: number) => void;
 }
 
 const CommandCentrePanel: React.FC<CommandCentreProps> = ({
@@ -70,12 +77,37 @@ const CommandCentrePanel: React.FC<CommandCentreProps> = ({
     topSolutionModalTicketId,
     closeTopSolutionsModal,
     onOpenRoom,
-    isSessionLoading
+    isSessionLoading,
+    onSubmitFeedback
 }) => {
     const [queueTab, setQueueTab] = React.useState<'NORMAL' | 'EMAIL'>('NORMAL');
+    const [sentSolution, setSentSolution] = React.useState<SentSolutionFeedback | null>(null);
+    const [rating, setRating] = React.useState<number>(0);
+    const [submittingRating, setSubmittingRating] = React.useState(false);
+
     const shownTickets = queueTab === 'EMAIL' ? emailTickets : filteredTickets;
     const modalTicket = topSolutionModalTicketId ? emailTickets.find((ticket) => ticket.ticketId === topSolutionModalTicketId) || null : null;
     const modalSolutions = topSolutionModalTicketId ? (topSolutionsByTicket[topSolutionModalTicketId] || []) : [];
+
+    const handleApplyAndTrack = (ticketId: string, solution: string) => {
+        handleApplyTopSolution(ticketId, solution);
+        setSentSolution({ ticketId, solutionText: solution });
+    };
+
+    const submitFeedback = async (r: number) => {
+        if (!sentSolution) return;
+        setRating(r);
+        setSubmittingRating(true);
+        try {
+            await onSubmitFeedback(sentSolution.ticketId, r);
+            setSentSolution(null);
+            setRating(0);
+        } catch (err) {
+            console.error('Feedback failed', err);
+        } finally {
+            setSubmittingRating(false);
+        }
+    };
 
     return (
         <div style={styles.opsGrid} className="fade-in">
@@ -141,7 +173,11 @@ const CommandCentrePanel: React.FC<CommandCentreProps> = ({
                             <div key={t._id} style={styles.queueCard}>
                                 <div style={styles.qHeader}>
                                     <span style={styles.qId}>{t.displayId || `#${t.ticketId.substring(0, 8).toUpperCase()}`}</span>
-                                    <span style={{ ...styles.qTag, ...styles[`status_${t.status.replace(' ', '_')}` as keyof typeof styles] }}>{t.status}</span>
+                                    <span style={{ 
+                                        ...styles.qTag, 
+                                        ...styles[`status_${t.status.replace(' ', '_')}` as keyof typeof styles],
+                                        ...(t.status === 'REOPENED' ? { border: '1px solid var(--accent-blue)', color: 'var(--accent-blue)' } : {})
+                                    }}>{t.status}</span>
                                 </div>
                                 {isEmailTicket && t.emailMeta?.subject && (
                                     <div style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '6px' }}>
@@ -161,10 +197,11 @@ const CommandCentrePanel: React.FC<CommandCentreProps> = ({
                                 )}
                                 <div style={styles.qActions}>
                                     {t.status === 'ASSIGNED' && <button onClick={() => handleTicketUpdate(t.ticketId, 'IN_PROGRESS')} style={styles.qBtn}>{queueTab === 'EMAIL' ? 'Accept Ticket' : 'Accept Task'}</button>}
+                                    {t.status === 'REOPENED' && <button onClick={() => handleTicketUpdate(t.ticketId, 'IN_PROGRESS')} style={{ ...styles.qBtn, border: '1px solid var(--accent-blue)', color: 'var(--accent-blue)' }}>Acknowledge Reply</button>}
                                     {queueTab === 'EMAIL' && <button onClick={() => handleLoadTopSolutions(t.ticketId)} style={{ ...styles.qBtn, border: '1px solid var(--accent-yellow)', color: 'var(--accent-yellow)' }} disabled={loadingTopSolutionsFor === t.ticketId}>{loadingTopSolutionsFor === t.ticketId ? 'Loading...' : 'Top 3 Solutions'}</button>}
                                     <button onClick={() => onOpenRoom(t.ticketId)} style={{ ...styles.qBtn, border: '1px solid var(--accent-yellow)', color: 'var(--accent-yellow)' }}>Open Room</button>
                                     {t.status === 'IN_PROGRESS' && t.assignedBy === 'SUPERVISOR' && <button onClick={() => handleTicketUpdate(t.ticketId, 'RESOLUTION_REQUESTED')} style={{ ...styles.qBtn, border: '1px solid var(--accent-yellow)', color: 'var(--accent-yellow)' }}>Request Resolution</button>}
-                                    {t.status === 'IN_PROGRESS' && t.assignedBy !== 'SUPERVISOR' && <button onClick={() => handleTicketUpdate(t.ticketId, 'RESOLVED')} style={{ ...styles.qBtn, border: '1px solid var(--accent-yellow)', color: 'var(--accent-yellow)' }}>Resolve</button>}
+                                    {(t.status === 'IN_PROGRESS' || t.status === 'REOPENED') && t.assignedBy !== 'SUPERVISOR' && <button onClick={() => handleTicketUpdate(t.ticketId, 'RESOLVED')} style={{ ...styles.qBtn, border: '1px solid var(--accent-yellow)', color: 'var(--accent-yellow)' }}>Resolve</button>}
                                     {t.status === 'RESOLUTION_REQUESTED' && <div style={{ fontSize: '0.75rem', fontWeight: '800', color: 'var(--accent-yellow)', display: 'flex', alignItems: 'center', gap: '8px' }}><Activity size={14} className="spin" /> VERIFYING...</div>}
                                 </div>
                                 {queueTab === 'EMAIL' && solutions.length > 0 && <div style={{ marginTop: '12px', fontSize: '0.75rem', color: 'var(--accent-yellow)', fontWeight: 700 }}>Top solutions ready • click button to review</div>}
@@ -177,40 +214,83 @@ const CommandCentrePanel: React.FC<CommandCentreProps> = ({
             {modalTicket && (
                 <div style={styles.solutionModalOverlay}>
                     <div style={styles.solutionModalCard}>
-                        <div style={styles.sectionHeader}>
-                            <div>
-                                <h3 style={styles.sectionTitle}>Top 3 Solutions</h3>
-                                <div style={styles.rowFooter}>
-                                    {modalTicket.displayId || modalTicket.ticketId} • {modalTicket.emailMeta?.customerEmail || 'No customer email'}
+                        {sentSolution ? (
+                            <div style={{ textAlign: 'center', padding: '20px' }} className="fade-in">
+                                <h3 style={{ ...styles.sectionTitle, color: 'var(--accent-blue)', marginBottom: '15px' }}>✅ Solution Sent!</h3>
+                                <p style={{ color: 'var(--text-secondary)', marginBottom: '20px' }}>How confident are you this will help?</p>
+                                <div style={{ display: 'flex', justifyContent: 'center', gap: '20px', marginBottom: '30px' }}>
+                                    {[1, 2, 3].map((s) => (
+                                        <button
+                                            key={s}
+                                            onClick={() => submitFeedback(s)}
+                                            disabled={submittingRating}
+                                            style={{
+                                                background: 'transparent',
+                                                border: 'none',
+                                                cursor: 'pointer',
+                                                transition: 'transform 0.2s',
+                                                fontSize: '2rem',
+                                                filter: rating >= s || (!rating && !submittingRating) ? 'grayscale(0)' : 'grayscale(1)',
+                                                transform: rating === s ? 'scale(1.2)' : 'scale(1)'
+                                            }}
+                                        >
+                                            ⭐
+                                        </button>
+                                    ))}
+                                </div>
+                                <div style={{ display: 'flex', justifyContent: 'center', gap: '12px' }}>
+                                    <button onClick={() => setSentSolution(null)} style={{ ...styles.qBtn, border: 'none', color: 'var(--text-muted)' }}>Skip Feedback</button>
                                 </div>
                             </div>
-                            <button onClick={closeTopSolutionsModal} style={{ ...styles.qBtn, maxWidth: '100px', border: '1px solid var(--accent-yellow)', color: 'var(--accent-yellow)' }}>
-                                Close
-                            </button>
-                        </div>
-                        <div style={{ ...styles.rowFooter, marginBottom: '12px' }}>
-                            Subject: {modalTicket.emailMeta?.subject || 'No subject'}
-                        </div>
-                        <div style={{ display: 'grid', gap: '12px' }}>
-                            {modalSolutions.map((solution) => (
-                                <div key={`${modalTicket.ticketId}-${solution.rank}`} style={styles.solutionCard}>
-                                    <div style={{ display: 'flex', justifyContent: 'space-between', gap: '12px', alignItems: 'center' }}>
-                                        <strong style={{ color: 'var(--accent-yellow)' }}>Option {solution.rank}</strong>
-                                        <span style={{ ...styles.solutionSourceBadge, color: 'var(--accent-yellow)', borderColor: 'var(--accent-yellow)' }}>
-                                            {solution.source === 'historical' ? `Historical • ${solution.usageCount}x` : 'Bootstrap'}
-                                        </span>
+                        ) : (
+                            <>
+                                <div style={styles.sectionHeader}>
+                                    <div>
+                                        <h3 style={styles.sectionTitle}>Top 3 Solutions</h3>
+                                        <div style={styles.rowFooter}>
+                                            {modalTicket.displayId || modalTicket.ticketId} • {modalTicket.emailMeta?.customerEmail || 'No customer email'}
+                                        </div>
                                     </div>
-                                    <div style={{ color: 'var(--text-secondary)', lineHeight: 1.5 }}>{solution.text}</div>
-                                    <button
-                                        onClick={() => handleApplyTopSolution(modalTicket.ticketId, solution.text)}
-                                        style={{ ...styles.qBtn, border: '1px solid var(--accent-yellow)', color: 'var(--accent-yellow)' }}
-                                        disabled={applyTopSolutionPending}
-                                    >
-                                        Send this solution
+                                    <button onClick={closeTopSolutionsModal} style={{ ...styles.qBtn, maxWidth: '100px', border: '1px solid var(--accent-yellow)', color: 'var(--accent-yellow)' }}>
+                                        Close
                                     </button>
                                 </div>
-                            ))}
-                        </div>
+                                <div style={{ ...styles.rowFooter, marginBottom: '12px' }}>
+                                    Subject: {modalTicket.emailMeta?.subject || 'No subject'}
+                                </div>
+                                <div style={{ display: 'grid', gap: '12px' }}>
+                                    {modalSolutions.map((solution) => (
+                                        <div key={`${modalTicket.ticketId}-${solution.rank}`} style={styles.solutionCard}>
+                                            <div style={{ display: 'flex', justifyContent: 'space-between', gap: '12px', alignItems: 'center' }}>
+                                                <strong style={{ color: 'var(--accent-yellow)' }}>Option {solution.rank}</strong>
+                                                <div style={{ display: 'flex', gap: '8px' }}>
+                                                    {solution.confidence !== undefined && (
+                                                        <span style={{ 
+                                                            ...styles.solutionSourceBadge, 
+                                                            color: solution.confidence > 70 ? 'var(--accent-blue)' : 'var(--text-muted)', 
+                                                            borderColor: solution.confidence > 70 ? 'var(--accent-blue)' : 'var(--text-muted)' 
+                                                        }}>
+                                                            {solution.confidence}% Confident
+                                                        </span>
+                                                    )}
+                                                    <span style={{ ...styles.solutionSourceBadge, color: 'var(--accent-yellow)', borderColor: 'var(--accent-yellow)' }}>
+                                                        {solution.source === 'orama' ? 'AI Suggestion' : solution.source === 'historical' ? `Historical • ${solution.usageCount}x` : 'Bootstrap'}
+                                                    </span>
+                                                </div>
+                                            </div>
+                                            <div style={{ color: 'var(--text-secondary)', lineHeight: 1.5 }}>{solution.text}</div>
+                                            <button
+                                                onClick={() => handleApplyAndTrack(modalTicket.ticketId, solution.text)}
+                                                style={{ ...styles.qBtn, border: '1px solid var(--accent-yellow)', color: 'var(--accent-yellow)' }}
+                                                disabled={applyTopSolutionPending}
+                                            >
+                                                Send this solution
+                                            </button>
+                                        </div>
+                                    ))}
+                                </div>
+                            </>
+                        )}
                     </div>
                 </div>
             )}

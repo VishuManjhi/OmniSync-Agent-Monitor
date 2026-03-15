@@ -6,6 +6,7 @@ import {
 	ticketUpdateSchema,
 	ticketReplySchema,
 	topSolutionApplySchema,
+	solutionFeedbackSchema,
 	ticketCollaboratorAddSchema,
 	ticketCollaboratorRemoveSchema
 } from '../middleware/validation.js';
@@ -21,5 +22,6 @@ router.delete('/:ticketId/collaborators', validate(ticketCollaboratorRemoveSchem
 router.post('/:ticketId/send-reply', validate(ticketReplySchema), ticketController.sendReply);
 router.get('/:ticketId/top-solutions', ticketController.getTopSolutions);
 router.post('/:ticketId/apply-solution', validate(topSolutionApplySchema), ticketController.applyTopSolution);
+router.post('/:ticketId/solution-feedback', validate(solutionFeedbackSchema), ticketController.submitAgentSolutionFeedback);
 
 export default router;

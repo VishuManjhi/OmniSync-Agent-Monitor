@@ -41,7 +41,15 @@ export interface Ticket {
     agentId: string;
     issueType: string;
     description: string;
-    status: 'OPEN' | 'IN_PROGRESS' | 'ASSIGNED' | 'PENDING_CUSTOMER' | 'RESOLUTION_REQUESTED' | 'RESOLVED' | 'REJECTED';
+    status: 'OPEN' | 'IN_PROGRESS' | 'ASSIGNED' | 'PENDING_CUSTOMER' | 'RESOLUTION_REQUESTED' | 'RESOLVED' | 'REJECTED' | 'REOPENED';
+    solutionFeedback?: {
+        suggestedSolution?: string;
+        source?: string;
+        appliedAt?: number;
+        agentRating?: number;
+        customerRating?: number;
+        confidenceScore?: number;
+    };
     issueDateTime: number;
     resolvedAt: number | null;
     callDuration?: number | null;

@@ -11,6 +11,7 @@ import {
     updateTicket,
     fetchTopSolutions,
     applyTopSolution,
+    submitSolutionFeedback,
     fetchTicketCollaborators,
     addTicketCollaborator,
     fetchAgent,
@@ -210,6 +211,17 @@ const AgentDashboard: React.FC = () => {
                 return;
             }
             showNotification(message, 'error', 'SYSTEM ERROR');
+        }
+    });
+
+    const submitSolutionFeedbackMutation = useMutation({
+        mutationFn: ({ ticketId, rating, notes }: { ticketId: string; rating: number; notes?: string }) =>
+            submitSolutionFeedback(ticketId, rating, notes),
+        onSuccess: () => {
+            showNotification('Thank you for your feedback! This helps improve our future suggestions.', 'success', 'METRICS UPDATED');
+        },
+        onError: (err: unknown) => {
+            console.error('Feedback submission failed', err);
         }
     });
 
@@ -636,6 +648,7 @@ const AgentDashboard: React.FC = () => {
                             closeTopSolutionsModal={closeTopSolutionsModal}
                             onOpenRoom={handleOpenTicketRoom}
                             isSessionLoading={isSessionLoading}
+                            onSubmitFeedback={(ticketId, rating) => submitSolutionFeedbackMutation.mutate({ ticketId, rating })}
                         />
                     )}
 

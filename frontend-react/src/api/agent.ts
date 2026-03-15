@@ -66,12 +66,18 @@ export const updateTicket = (ticketId: string, updates: Partial<Ticket>) =>
     });
 
 export const fetchTopSolutions = (ticketId: string) =>
-    apiFetch<{ ok: boolean; ticketId: string; issueType: string; solutions: Array<{ rank: number; text: string; usageCount: number; lastUsedAt?: number | null; source?: string }> }>(`/api/tickets/${ticketId}/top-solutions`);
+    apiFetch<{ ok: boolean; ticketId: string; issueType: string; solutions: Array<{ rank: number; text: string; usageCount: number; lastUsedAt?: number | null; source?: string; confidence: number }> }>(`/api/tickets/${ticketId}/top-solutions`);
 
 export const applyTopSolution = (ticketId: string, solution: string) =>
     apiFetch<{ ok: boolean; messageId?: string; to?: string; ticketId: string }>(`/api/tickets/${ticketId}/apply-solution`, {
         method: 'POST',
         body: JSON.stringify({ solution })
+    });
+
+export const submitSolutionFeedback = (ticketId: string, rating: number, notes?: string) =>
+    apiFetch<{ ok: boolean; matched: number }>(`/api/tickets/${ticketId}/solution-feedback`, {
+        method: 'POST',
+        body: JSON.stringify({ rating, notes })
     });
 
 export const fetchTicketCollaborators = (ticketId: string) =>

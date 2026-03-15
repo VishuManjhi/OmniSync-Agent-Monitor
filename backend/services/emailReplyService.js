@@ -3,9 +3,11 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import mongoose from 'mongoose';
 import Ticket from '../models/Ticket.js';
+import crypto from 'crypto';
 import { postmarkSend, postmarkSendWithTemplate } from './postmarkService.js';
 import { setTicketPendingCustomer } from './ticketService.js';
 import { searchOramaSolutions } from './oramaIndexService.js';
+import { computeConfidenceBatch } from './confidenceService.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -356,16 +358,28 @@ export async function getTopHistoricalSolutions({ ticketId, limit = 3 }) {
         }
     }
 
+    // Phase 4: Factor in Confidence Scores
+    const bucketKeys = Array.from(bucket.keys());
+    const confidenceMap = await computeConfidenceBatch(bucketKeys);
+
     const rankedRows = Array.from(bucket.values());
     const maxCount = rankedRows.reduce((max, row) => Math.max(max, row.count || 0), 1);
     const maxLastUsed = rankedRows.reduce((max, row) => Math.max(max, row.lastUsed || 0), 1);
     const maxOrama = rankedRows.reduce((max, row) => Math.max(max, row.oramaScore || 0), 1);
 
     for (const row of rankedRows) {
+        const key = row.text.toLowerCase().trim();
+        const conf = confidenceMap.get(key) || 0;
+        row.confidence = conf;
+
         const usageNorm = maxCount > 0 ? row.count / maxCount : 0;
         const recencyNorm = maxLastUsed > 0 ? row.lastUsed / maxLastUsed : 0;
         const oramaNorm = maxOrama > 0 ? row.oramaScore / maxOrama : 0;
-        row.finalScore = (oramaNorm * 0.6) + (usageNorm * 0.3) + (recencyNorm * 0.1);
+        const confidenceNorm = conf / 100;
+
+        // Revised formula: semantic (40%) + confidence (35%) + usage (15%) + recency (10%)
+        row.finalScore = (oramaNorm * 0.4) + (confidenceNorm * 0.35) + (usageNorm * 0.15) + (recencyNorm * 0.1);
+
         if (oramaNorm > 0) {
             row.source = 'orama';
         }
@@ -384,7 +398,8 @@ export async function getTopHistoricalSolutions({ ticketId, limit = 3 }) {
             text: entry.text,
             usageCount: entry.count,
             lastUsedAt: entry.lastUsed || null,
-            source: entry.source || 'historical'
+            source: entry.source || 'historical',
+            confidence: entry.confidence || 0
         })), current.issueType, limit);
 
     if (!solutions.length) {
@@ -430,9 +445,39 @@ export async function applyHistoricalSolution({ ticketId, solutionText, actorId 
         throw err;
     }
 
+    const feedbackToken = crypto.randomUUID();
+    const publicBaseUrl = process.env.PUBLIC_BASE_URL || 'http://localhost:5173';
+    const apiBaseUrl = process.env.API_BASE_URL || 'http://localhost:3003';
+
     const customerName = ticket?.emailMeta?.customerName || 'there';
     const subject = `Update on your ticket ${ticket.displayId || ticket.ticketId}`;
+
+    const ratingLinks = `
+        <div style="margin-top: 30px; padding: 20px; background: #f8fafc; border-radius: 12px; text-align: center;">
+            <p style="margin-bottom: 15px; font-weight: 700; color: #0f172a;">Did this help?</p>
+            <div style="display: flex; justify-content: center; gap: 15px;">
+                <a href="${apiBaseUrl}/api/public/ticket-action?token=${feedbackToken}&rating=3" style="text-decoration: none; padding: 10px 15px; background: #fff; border: 1px solid #e2e8f0; border-radius: 8px; color: #0f172a;">⭐⭐⭐ Fixed it!</a>
+                <a href="${apiBaseUrl}/api/public/ticket-action?token=${feedbackToken}&rating=2" style="text-decoration: none; padding: 10px 15px; background: #fff; border: 1px solid #e2e8f0; border-radius: 8px; color: #0f172a;">⭐⭐ Partially</a>
+                <a href="${apiBaseUrl}/api/public/ticket-action?token=${feedbackToken}&rating=1" style="text-decoration: none; padding: 10px 15px; background: #fff; border: 1px solid #e2e8f0; border-radius: 8px; color: #0f172a;">⭐ Didn't help</a>
+            </div>
+            <div style="margin-top: 20px;">
+                <a href="${apiBaseUrl}/api/public/ticket-action?token=${feedbackToken}&resolve=true&rating=3" style="display: inline-block; background: #10b981; color: #fff; padding: 12px 30px; border-radius: 8px; text-decoration: none; font-weight: 700;">✅ Mark as Resolved</a>
+            </div>
+        </div>
+    `;
+
     const textBody = `Hi ${customerName},\n\nBased on similar resolved cases, please try this:\n${cleanedSolution}\n\nReply to this email if the issue persists.\n\nRegards,\nSupport Team`;
+    const htmlBody = `
+        <div style="font-family: sans-serif; max-width: 600px; color: #334155;">
+            <p>Hi ${customerName},</p>
+            <p>Based on similar resolved cases, please try this:</p>
+            <blockquote style="border-left: 4px solid #facc15; padding-left: 15px; margin: 20px 0; font-style: italic; color: #0f172a;">
+                ${cleanedSolution}
+            </blockquote>
+            ${ratingLinks}
+            <p style="margin-top: 30px; font-size: 14px; color: #64748b;">Or simply reply to this email if the issue persists.</p>
+        </div>
+    `;
 
     let sendResult;
     try {
@@ -443,7 +488,9 @@ export async function applyHistoricalSolution({ ticketId, solutionText, actorId 
                 name: customerName,
                 displayId: ticket.displayId || ticket.ticketId,
                 note: cleanedSolution,
-                solution: cleanedSolution
+                solution: cleanedSolution,
+                feedbackToken,
+                apiBaseUrl
             }
         });
     } catch (err) {
@@ -451,21 +498,34 @@ export async function applyHistoricalSolution({ ticketId, solutionText, actorId 
         sendResult = await postmarkSend({
             to: customerEmail,
             subject,
-            textBody
+            textBody,
+            htmlBody: htmlBody
         });
     }
 
-    await setTicketPendingCustomer(ticketId, {
-        reply: {
-            direction: 'outbound',
-            templateKey: 'HISTORICAL_TOP_SOLUTION',
-            note: cleanedSolution,
-            message: textBody,
-            providerMessageId: sendResult?.MessageID,
-            at: Date.now(),
-            actorId
+    await Ticket.updateOne(
+        query,
+        {
+            $set: {
+                status: 'PENDING_CUSTOMER',
+                'solutionFeedback.suggestedSolution': cleanedSolution,
+                'solutionFeedback.source': 'historical', // Default to historical unless specified
+                'solutionFeedback.appliedAt': Date.now(),
+                'solutionFeedback.feedbackToken': feedbackToken
+            },
+            $push: {
+                'emailMeta.replies': {
+                    direction: 'outbound',
+                    templateKey: 'HISTORICAL_TOP_SOLUTION',
+                    note: cleanedSolution,
+                    message: textBody,
+                    providerMessageId: sendResult?.MessageID,
+                    at: Date.now(),
+                    actorId
+                }
+            }
         }
-    });
+    );
 
     return {
         ok: true,
