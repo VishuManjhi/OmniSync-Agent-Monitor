@@ -6,7 +6,7 @@
 [![MongoDB](https://img.shields.io/badge/MongoDB-Mongoose-47A248?style=for-the-badge&logo=mongodb)](https://www.mongodb.com/)
 [![Socket.IO](https://img.shields.io/badge/Socket.IO-Real--Time-white?style=for-the-badge&logo=socketdotio)](https://socket.io/)
 
-OmniSync is a real-time agent-supervisor operations platform for contact center workflows. It combines ticket lifecycle control, session tracking, live messaging, analytics, report export/email, and asynchronous job processing.
+OmniSync is a real-time support operations platform for contact center workflows. It combines ticket lifecycle control, session tracking, live messaging, analytics, report export/email, and asynchronous job processing.
 
 
 <img width="1152" height="645" alt="image" src="https://github.com/user-attachments/assets/28f3399f-6da9-4130-a694-60bba17700bc" />
