@@ -8,6 +8,10 @@
 
 OmniSync is a real-time agent-supervisor operations platform for contact center workflows. It combines ticket lifecycle control, session tracking, live messaging, analytics, report export/email, and asynchronous job processing.
 
+
+<img width="1152" height="645" alt="image" src="https://github.com/user-attachments/assets/28f3399f-6da9-4130-a694-60bba17700bc" />
+
+
 ---
 
 ## Table of Contents
@@ -32,8 +36,8 @@ OmniSync is a real-time agent-supervisor operations platform for contact center 
 
 The system has two main personas:
 
-- **Agent**: login, manage session (clock in/out, breaks, on-call), raise tickets, request support, receive broadcasts.
-- **Supervisor**: monitor live agent states, manage ticket lifecycle, run SLA automation, access reporting centre, view async job status, send communications.
+- **Agents**: login, manage session (clock in/out, breaks, on-call), raise tickets, collaborate using rooms, use AI Solutions, request support, receive broadcasts.
+- **Supervisors**: monitor their teams, monitor live agent states, manage ticket lifecycle, run SLA automation, access reporting centre, view async job status, send communications.
 
 The project currently includes:
 
@@ -46,29 +50,35 @@ The project currently includes:
 
 ## Core Features
 
-### 1) Authentication & Roles
+### 1) Authentication, Roles and Error Handling 
 - JWT-based auth with role-aware behavior (`agent`, `supervisor`).
 - Passport JWT protection for private APIs.
+- Global Error Handling making debugging easy.
 
-### 2) Agent Operations
+### 2) Weighted Intelligent Triage System & Top Solutions
+- Automatically parse and assign incoming mails that are sent to the support mail of the system.
+- Agents gets assigned tickets based on a weighted formula.
+- Agent can automatically send solutions if the ticket similar ticket has been solved in the past using Orama.  
+
+### 3) Agent Operations
 - Session and status transitions (active, on call, on break, offline).
 - Ticket creation and updates with validation rules.
 - Real-time support/help messaging and broadcast reception.
 
-### 3) Supervisor Operations
+### 4) Supervisor Operations
 - Dashboard with agent visibility and ticket insights.
 - Agent card quick actions including **Open Report**.
 - Ticket approvals/rejections for supervisor-assigned flow.
 - **Job Status** tab for async pipeline observability.
 - **SLA Automation** tab for breach listing and escalation.
 
-### 4) Reports & Analytics
+### 5) Reports & Analytics
 - Weekly/monthly agent performance reports.
 - Excel export generation.
 - Email report delivery via SMTP.
 - Mongo aggregation-based analytics (ticket trends, AHT, attendance).
 
-### 5) Async Processing
+### 6) Async Processing
 - SQS-backed queue processing for:
   - `EXCEL_EXPORT`
   - `EMAIL_REPORT`
@@ -103,6 +113,7 @@ The project currently includes:
 | Backend | Node.js, Express, Passport JWT, Zod |
 | Database | MongoDB + Mongoose |
 | Realtime | Socket.IO | Postmark
+| Search | Orama
 | Queue | AWS SQS (`@aws-sdk/client-sqs`) |
 | Reporting | ExcelJS, Nodemailer |
 | Security | Helmet, HPP, CORS, rate limiting |
@@ -323,13 +334,13 @@ Then restart backend/frontend.
 
 ---
 
-## Roadmap / Next Improvements
+## New Improvements
 
-- Add Job Status filters (`type`, `status`) and quick retry actions.
-- Add Redis cache layer for analytics-heavy reads.
-- Add Socket.IO Redis adapter for horizontal scaling.
-- Add deployment manifests and CI checks.
-- Add E2E tests for report + job lifecycle flows.
+- Added Team based supervision.
+- Added Redis cache layer for analytics-heavy reads and recently resovled tickets.
+- Added Email Ingestion and FeedBack Loop implementing a intelligent triage system. 
+- Added deployment manifests and CI checks.
+- Added E2E tests/Smoke Tests for report + job lifecycle flows.
 
 ---
 
