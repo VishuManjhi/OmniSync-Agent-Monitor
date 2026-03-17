@@ -102,7 +102,7 @@ The project currently includes:
 | Frontend | React 19, TypeScript, Vite, TanStack Query, Lucide |
 | Backend | Node.js, Express, Passport JWT, Zod |
 | Database | MongoDB + Mongoose |
-| Realtime | Socket.IO |
+| Realtime | Socket.IO | Postmark
 | Queue | AWS SQS (`@aws-sdk/client-sqs`) |
 | Reporting | ExcelJS, Nodemailer |
 | Security | Helmet, HPP, CORS, rate limiting |
